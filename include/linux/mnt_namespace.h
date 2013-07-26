@@ -13,6 +13,8 @@ extern void put_mnt_ns(struct mnt_namespace *ns);
 extern const struct file_operations proc_mounts_operations;
 extern const struct file_operations proc_mountinfo_operations;
 extern const struct file_operations proc_mountstats_operations;
+extern const struct inode_operations proc_mnt_inode_operations;
+extern const struct file_operations proc_mnt_operations;
 
 #endif
 #endif
