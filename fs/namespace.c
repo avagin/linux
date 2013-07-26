@@ -3219,3 +3219,201 @@ const struct proc_ns_operations mntns_operations = {
 	.put		= mntns_put,
 	.install	= mntns_install,
 };
+
+#include "proc/internal.h"
+
+static inline int proc_fd(struct inode *inode)
+{
+	return PROC_I(inode)->fd;
+}
+
+struct vfsmount *lookup_mnt_by_id(struct task_struct *task, int mnt_id)
+{
+	struct mnt_namespace *ns = task->nsproxy->mnt_ns;
+	struct mount *mnt;
+
+	list_for_each_entry(mnt, &ns->list, mnt_list) {
+		if (mnt->mnt_id == mnt_id)
+			break;
+	}
+
+	if (&mnt->mnt_list == &ns->list)
+		mnt = NULL;
+	else
+		mntget(&mnt->mnt);
+
+	return mnt ? &mnt->mnt : NULL;
+}
+
+static int proc_mnt_link(struct dentry *dentry, struct path *path)
+{
+	struct vfsmount *mnt = NULL;
+	struct task_struct *task;
+	int mnt_id = proc_fd(dentry->d_inode);
+	int ret = -ENOENT;
+
+	task = get_proc_task(dentry->d_inode);
+	if (task) {
+		mnt = lookup_mnt_by_id(task, mnt_id);
+		put_task_struct(task);
+	}
+	if (mnt == NULL)
+		return ret;
+
+	path->mnt = mnt;
+	path->dentry = dget(mnt->mnt_root);
+
+	return 0;
+}
+
+static int mnt_d_revalidate(struct dentry *dentry, unsigned int flags)
+{
+	struct task_struct *task;
+	struct vfsmount *mnt;
+	struct inode *inode, *mnt_ino;
+	int mnt_id;
+
+	inode = dentry->d_inode;
+	task = get_proc_task(inode);
+	mnt_id = proc_fd(inode);
+
+	if (!task)
+		goto out_drop;
+
+	mnt = lookup_mnt_by_id(task, mnt_id);
+	if (!mnt)
+		goto out_put;
+	mnt_ino = mnt->mnt_root->d_inode;
+
+	inode->i_uid = mnt_ino->i_uid;
+	inode->i_gid = mnt_ino->i_gid;
+	inode->i_mode = (mnt_ino->i_mode & (S_IRWXU|S_IRUGO|S_IXUGO)) | S_IFLNK;
+	mntput(mnt);
+
+	security_task_to_inode(task, inode);
+	put_task_struct(task);
+	return 1;
+
+out_put:
+	put_task_struct(task);
+out_drop:
+	d_drop(dentry);
+	return 0;
+}
+
+static const struct dentry_operations mnt_dentry_operations = {
+	.d_revalidate = mnt_d_revalidate,
+	.d_delete       = pid_delete_dentry,
+};
+
+static int
+proc_mnt_instantiate(struct inode *dir, struct dentry *dentry,
+			   struct task_struct *task, const void *ptr)
+{
+	unsigned mnt_id = (unsigned long)ptr;
+	struct proc_inode *ei;
+	struct inode *inode;
+
+	inode = proc_pid_make_inode(dir->i_sb, task);
+	if (!inode)
+		return -ENOENT;
+
+	ei = PROC_I(inode);
+	ei->fd = mnt_id;
+
+	inode->i_mode = S_IFLNK;
+	inode->i_op = &proc_pid_link_inode_operations;
+	inode->i_size = 64;
+
+	ei->op.proc_get_link = proc_mnt_link;
+
+	d_set_d_op(dentry, &mnt_dentry_operations);
+	d_add(dentry, inode);
+
+	return 0;
+}
+
+static struct dentry *proc_lookupfd_mnt(struct inode *dir,
+					   struct dentry *dentry,
+					   unsigned int flags)
+{
+	unsigned mnt_id = name_to_int(dentry);
+	struct task_struct *task;
+	int result;
+
+	result = -EPERM;
+	if (!may_mount())
+		goto out_no_task;
+
+	result = -ENOENT;
+	task = get_proc_task(dir);
+	if (!task)
+		goto out_no_task;
+
+	down_read(&namespace_sem);
+	result = proc_mnt_instantiate(dir, dentry, task, (void *)(unsigned long)mnt_id);
+	up_read(&namespace_sem);
+
+	put_task_struct(task);
+out_no_task:
+	return ERR_PTR(result);
+}
+
+static int proc_mnt_readdir(struct file *file, struct dir_context *ctx)
+{
+	struct task_struct *task;
+	struct mount *mnt;
+	int ret, pos;
+	struct mnt_namespace *ns;
+
+	ret = -EPERM;
+	if (!may_mount())
+		goto out;
+
+	ret = -ENOENT;
+	task = get_proc_task(file_inode(file));
+	if (!task)
+		goto out;
+
+	ret = 0;
+	if (!dir_emit_dots(file, ctx))
+		goto out_put_task;
+
+	pos = 2;
+	ns = task->nsproxy->mnt_ns;
+
+	down_read(&namespace_sem);
+	list_for_each_entry(mnt, &ns->list, mnt_list) {
+		char name[PROC_NUMBUF];
+		int len;
+
+		if (++pos <= ctx->pos)
+			continue;
+
+		len = snprintf(name, sizeof(name), "%d", mnt->mnt_id);
+		if (!proc_fill_cache(file, ctx,
+				      name, len,
+				      proc_mnt_instantiate,
+				      task,
+				      (void *)(unsigned long)mnt->mnt_id))
+			break;
+		ctx->pos++;
+	}
+	up_read(&namespace_sem);
+out_put_task:
+	put_task_struct(task);
+out:
+	return ret;
+}
+
+const struct inode_operations proc_mnt_inode_operations = {
+	.lookup		= proc_lookupfd_mnt,
+	.setattr	= proc_setattr,
+};
+
+const struct file_operations proc_mnt_operations = {
+	.read		= generic_read_dir,
+	.iterate	= proc_mnt_readdir,
+	.llseek		= default_llseek,
+};
+
