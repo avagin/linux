@@ -1701,8 +1701,23 @@ static int prctl_set_mm(int opt, unsigned long addr,
 	if (arg5 || (arg4 && opt != PR_SET_MM_AUXV))
 		return -EINVAL;
 
-	if (!capable(CAP_SYS_RESOURCE))
-		return -EPERM;
+	if (!capable(CAP_SYS_RESOURCE)) {
+		switch (opt) {
+		case PR_SET_MM_START_DATA:
+		case PR_SET_MM_END_DATA:
+		case PR_SET_MM_START_BRK:
+		case PR_SET_MM_BRK:
+			if (rlim < RLIM_INFINITY)
+				return -EPERM;
+			break;
+		case PR_SET_MM_START_STACK:
+			if (rlimit(RLIMIT_STACK) < RLIM_INFINITY)
+				return -EPERM;
+			break;
+		default:
+			return -EPERM;
+		}
+	}
 
 	if (opt == PR_SET_MM_EXE_FILE)
 		return prctl_set_mm_exe_file(mm, (unsigned int)addr);
