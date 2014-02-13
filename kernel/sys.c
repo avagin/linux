@@ -18,6 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/workqueue.h>
 #include <linux/capability.h>
+#include <linux/securebits.h>
 #include <linux/device.h>
 #include <linux/key.h>
 #include <linux/times.h>
@@ -1712,6 +1713,10 @@ static int prctl_set_mm(int opt, unsigned long addr,
 			break;
 		case PR_SET_MM_START_STACK:
 			if (rlimit(RLIMIT_STACK) < RLIM_INFINITY)
+				return -EPERM;
+			break;
+		case PR_SET_MM_EXE_FILE:
+			if (!issecure(SECURE_SET_EXE_FILE))
 				return -EPERM;
 			break;
 		default:

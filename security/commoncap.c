@@ -907,6 +907,13 @@ int cap_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 		    )
 			/* cannot change a locked bit */
 			goto error;
+
+		/* Setting SECURE_SET_EXE_FILE requires CAP_SYS_RESOURCE */
+		if ((arg2 & SECBIT_SET_EXE_FILE) &&
+		    !(new->securebits & SECBIT_SET_EXE_FILE) &&
+		    !capable(CAP_SYS_RESOURCE))
+			goto error;
+
 		new->securebits = arg2;
 		goto changed;
 

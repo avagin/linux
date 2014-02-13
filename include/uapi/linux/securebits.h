@@ -43,9 +43,19 @@
 #define SECBIT_KEEP_CAPS	(issecure_mask(SECURE_KEEP_CAPS))
 #define SECBIT_KEEP_CAPS_LOCKED (issecure_mask(SECURE_KEEP_CAPS_LOCKED))
 
+/* When set, a process can do PR_SET_MM_EXE_FILE even if it doesn't
+ * have CAP_SYS_RESOURCE. Setting of this bit requires CAP_SYS_RESOURCE.
+ * This bit is not dropped when a task moves in another userns. */
+#define SECURE_SET_EXE_FILE		6
+#define SECURE_SET_EXE_FILE_LOCKED	7  /* make bit-6 immutable */
+
+#define SECBIT_SET_EXE_FILE	   (issecure_mask(SECURE_SET_EXE_FILE))
+#define SECBIT_SET_EXE_FILE_LOCKED (issecure_mask(SECURE_SET_EXE_FILE_LOCKED))
+
 #define SECURE_ALL_BITS		(issecure_mask(SECURE_NOROOT) | \
 				 issecure_mask(SECURE_NO_SETUID_FIXUP) | \
-				 issecure_mask(SECURE_KEEP_CAPS))
+				 issecure_mask(SECURE_KEEP_CAPS) | \
+				 issecure_mask(SECURE_SET_EXE_FILE))
 #define SECURE_ALL_LOCKS	(SECURE_ALL_BITS << 1)
 
 #endif /* _UAPI_LINUX_SECUREBITS_H */
