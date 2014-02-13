@@ -1719,8 +1719,7 @@ static int prctl_set_mm(int opt, unsigned long addr,
 			if (!issecure(SECURE_SET_EXE_FILE))
 				return -EPERM;
 			break;
-		default:
-			return -EPERM;
+		/* Other options don't require special capabilities */
 		}
 	}
 
