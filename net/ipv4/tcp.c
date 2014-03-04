@@ -1084,6 +1084,23 @@ int tcp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	lock_sock(sk);
 
 	flags = msg->msg_flags;
+
+	if (unlikely(tp->repair)) {
+		err = -EINVAL;
+		if (tp->repair_queue == TCP_NO_QUEUE)
+			goto out_err;
+
+		if (sk->sk_state != TCP_ESTABLISHED)
+			goto out_err;
+
+		if (tp->repair_queue == TCP_RECV_QUEUE) {
+			copied = tcp_send_rcvq(sk, msg, size);
+			goto out;
+		}
+
+		/* 'common' sending to sendq */
+	}
+
 	if (flags & MSG_FASTOPEN) {
 		err = tcp_sendmsg_fastopen(sk, msg, &copied_syn, size);
 		if (err == -EINPROGRESS && copied_syn > 0)
@@ -1103,22 +1120,6 @@ int tcp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	    !tcp_passive_fastopen(sk)) {
 		if ((err = sk_stream_wait_connect(sk, &timeo)) != 0)
 			goto do_error;
-	}
-
-	if (unlikely(tp->repair)) {
-		err = -EINVAL;
-		if (tp->repair_queue == TCP_NO_QUEUE)
-			goto out_err;
-
-		if (sk->sk_state != TCP_ESTABLISHED)
-			goto out_err;
-
-		if (tp->repair_queue == TCP_RECV_QUEUE) {
-			copied = tcp_send_rcvq(sk, msg, size);
-			goto out;
-		}
-
-		/* 'common' sending to sendq */
 	}
 
 	/* This should be in poll */
