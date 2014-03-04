@@ -562,6 +562,7 @@ void tcp_cwnd_application_limited(struct sock *sk);
 void tcp_resume_early_retransmit(struct sock *sk);
 void tcp_rearm_rto(struct sock *sk);
 void tcp_reset(struct sock *sk);
+void tcp_fin(struct sock *sk);
 
 /* tcp_timer.c */
 void tcp_init_xmit_timers(struct sock *);
