@@ -2314,6 +2314,60 @@ static int tcp_repair_options_est(struct tcp_sock *tp,
 	return 0;
 }
 
+static int tcp_repair_state(struct sock *sk, int state)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	if (sk->sk_state != TCP_ESTABLISHED)
+		return -EINVAL;
+
+	switch (state) {
+	case TCP_ESTABLISHED:
+		break;
+
+	case TCP_FIN_WAIT2:
+		if (tp->snd_una != tp->write_seq)
+			return -EINVAL;
+		tcp_set_state(sk, TCP_FIN_WAIT2);
+		break;
+
+	case TCP_TIME_WAIT:
+		if (tp->snd_una != tp->write_seq)
+			return -EINVAL;
+		local_bh_disable();
+		tcp_time_wait(sk, TCP_TIME_WAIT, 0);
+		local_bh_enable();
+		break;
+
+	case TCP_CLOSE_WAIT:
+		tcp_set_state(sk, TCP_CLOSE_WAIT);
+		break;
+
+	case TCP_LAST_ACK:
+	case TCP_FIN_WAIT1:
+	case TCP_CLOSING:
+		tcp_set_state(sk, state);
+		tcp_send_fin(sk);
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	if ((1 << sk->sk_state) & (TCPF_FIN_WAIT1 |
+				   TCPF_FIN_WAIT2 |
+				   TCPF_CLOSING	|
+				   TCPF_LAST_ACK))
+		sk->sk_shutdown |= SEND_SHUTDOWN;
+
+	if ((1 << sk->sk_state) & (TCPF_CLOSE_WAIT |
+				   TCPF_CLOSING |
+				   TCPF_LAST_ACK))
+		sk->sk_shutdown |= RCV_SHUTDOWN;
+
+	return 0;
+}
+
 /*
  *	Socket option code for TCP.
  */
@@ -2449,6 +2503,13 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 					optlen);
 		else
 			err = -EPERM;
+		break;
+
+	case TCP_REPAIR_STATE:
+		if (tp->repair)
+			err = tcp_repair_state(sk, val);
+		else
+			err = -EINVAL;
 		break;
 
 	case TCP_CORK:
