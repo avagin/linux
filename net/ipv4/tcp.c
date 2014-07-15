@@ -2261,8 +2261,7 @@ void tcp_sock_destruct(struct sock *sk)
 static inline bool tcp_can_repair_sock(const struct sock *sk)
 {
 	return ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN) &&
-		!((1 << sk->sk_state) & (TCPF_LISTEN |
-					 TCPF_SYN_SENT | TCPF_SYN_RECV));
+		!((1 << sk->sk_state) & (TCPF_LISTEN | TCPF_SYN_RECV));
 }
 
 static int tcp_repair_options_est(struct tcp_sock *tp,
@@ -2497,7 +2496,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 	case TCP_REPAIR_OPTIONS:
 		if (!tp->repair)
 			err = -EINVAL;
-		else if (sk->sk_state == TCP_ESTABLISHED)
+		else if ((1 << sk->sk_state) & (TCPF_ESTABLISHED | TCPF_SYN_SENT))
 			err = tcp_repair_options_est(tp,
 					(struct tcp_repair_opt __user *)optval,
 					optlen);
