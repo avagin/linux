@@ -1602,6 +1602,9 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
 {
 	struct mount *res, *p, *q, *r, *parent;
 
+	if (IS_MNT_NOCOPY(mnt))
+		return ERR_PTR(-EINVAL);
+
 	if (!(flag & CL_COPY_UNBINDABLE) && IS_MNT_UNBINDABLE(mnt))
 		return ERR_PTR(-EINVAL);
 
@@ -1622,6 +1625,12 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
 
 		for (s = r; s; s = next_mnt(s, r)) {
 			struct mount *t = NULL;
+
+			if (IS_MNT_NOCOPY(s)) {
+				s = skip_mnt_tree(s);
+				continue;
+			}
+
 			if (!(flag & CL_COPY_UNBINDABLE) &&
 			    IS_MNT_UNBINDABLE(s)) {
 				s = skip_mnt_tree(s);
@@ -1933,7 +1942,7 @@ static int flags_to_propagation_type(int flags)
 	int type = flags & ~(MS_REC | MS_SILENT);
 
 	/* Fail if any non-propagation flags are set */
-	if (type & ~(MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE))
+	if (type & ~(MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE | MS_NOCOPY))
 		return 0;
 	/* Only one propagation flag should be set */
 	if (!is_power_of_2(type))
@@ -2636,7 +2645,7 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 				    data_page);
 	else if (flags & MS_BIND)
 		retval = do_loopback(&path, dev_name, flags & MS_REC);
-	else if (flags & (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE))
+	else if (flags & (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE | MS_NOCOPY))
 		retval = do_change_type(&path, flags);
 	else if (flags & MS_MOVE)
 		retval = do_move_mount(&path, dev_name);

@@ -161,6 +161,8 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	}
 	if (IS_MNT_UNBINDABLE(r))
 		seq_puts(m, " unbindable");
+	if (IS_MNT_NOCOPY(r))
+		seq_puts(m, " nocopy");
 
 	/* Filesystem specific data */
 	seq_puts(m, " - ");

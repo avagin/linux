@@ -130,6 +130,10 @@ void change_mnt_propagation(struct mount *mnt, int type)
 			mnt->mnt.mnt_flags |= MNT_UNBINDABLE;
 		else
 			mnt->mnt.mnt_flags &= ~MNT_UNBINDABLE;
+		if (type == MS_NOCOPY)
+			mnt->mnt.mnt_flags |= MNT_NOCOPY;
+		else
+			mnt->mnt.mnt_flags &= ~MNT_NOCOPY;
 	}
 }
 
