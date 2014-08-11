@@ -24,6 +24,7 @@
 #include <linux/magic.h>
 #include <linux/bootmem.h>
 #include <linux/task_work.h>
+#include <linux/file.h>
 #include "pnode.h"
 #include "internal.h"
 
@@ -2347,6 +2348,79 @@ static int do_new_mount(struct path *path, const char *fstype, int flags,
 	if (err)
 		mntput(mnt);
 	return err;
+}
+
+SYSCALL_DEFINE4(open_mount, char __user *, dev_name, char __user *, user_type,
+				unsigned long, flags, void __user *, data)
+{
+	char *kernel_type;
+	char *kernel_dev;
+	unsigned long data_page;
+	struct file_system_type *type;
+	struct vfsmount *mnt;
+	struct path path;
+	struct file *file;
+	int ret;
+
+	kernel_type = copy_mount_string(user_type);
+	ret = PTR_ERR(kernel_type);
+	if (IS_ERR(kernel_type))
+		goto out_type;
+
+	type = get_fs_type(kernel_type);
+	if (!type) {
+		ret = -ENOENT;
+		goto out_fstype;
+	}
+
+	kernel_dev = copy_mount_string(dev_name);
+	ret = PTR_ERR(kernel_dev);
+	if (IS_ERR(kernel_dev))
+		goto out_dev;
+
+	ret = copy_mount_options(data, &data_page);
+	if (ret < 0)
+		goto out_data;
+
+	mnt = vfs_kern_mount(type, flags, kernel_dev, (void *)data_page);
+	if (!IS_ERR(mnt) && (type->fs_flags & FS_HAS_SUBTYPE) &&
+	    !mnt->mnt_sb->s_subtype)
+		mnt = fs_set_subtype(mnt, kernel_type);
+
+	if (IS_ERR(mnt)) {
+		ret = PTR_ERR(mnt);
+		goto out_mnt;
+	}
+
+	path.mnt = mnt;
+	path.dentry = mnt->mnt_root;
+
+	ret = get_unused_fd_flags(O_PATH);
+	if (ret < 0) {
+		path_put(&path);
+		goto out;
+	}
+
+	file = file_open_root(path.dentry, path.mnt, "", O_PATH);
+	if (IS_ERR(file)) {
+		put_unused_fd(ret);
+		ret =  PTR_ERR(file);
+	} else {
+		fsnotify_open(file);
+		fd_install(ret, file);
+	}
+out:
+	mntput(mnt);
+out_mnt:
+	free_page(data_page);
+out_data:
+	kfree(kernel_dev);
+out_dev:
+	put_filesystem(type);
+out_fstype:
+	kfree(kernel_type);
+out_type:
+	return ret;
 }
 
 int finish_automount(struct vfsmount *m, struct path *path)
