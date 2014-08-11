@@ -710,6 +710,9 @@ __SYSCALL(__NR_bpf, sys_bpf)
 #define __NR_execveat 281
 __SC_COMP(__NR_execveat, sys_execveat, compat_sys_execveat)
 
+#define __NR_open_mount 279
+__SYSCALL(__NR_open_mount, sys_open_mount)
+
 #undef __NR_syscalls
 #define __NR_syscalls 282
 
