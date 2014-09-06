@@ -759,7 +759,7 @@ static void put_mountpoint(struct mountpoint *mp)
 
 static inline int check_mnt(struct mount *mnt)
 {
-	return mnt->mnt_ns == current->nsproxy->mnt_ns;
+	return mnt->mnt_ns == NULL || mnt->mnt_ns == current->nsproxy->mnt_ns;
 }
 
 /*
@@ -1595,6 +1595,8 @@ static bool mnt_ns_loop(struct dentry *dentry)
 		return false;
 
 	mnt_ns = to_mnt_ns(get_proc_ns(dentry->d_inode));
+	if (mnt_ns == NULL)
+		return 0;
 	return current->nsproxy->mnt_ns->seq >= mnt_ns->seq;
 }
 
