@@ -3337,7 +3337,7 @@ static struct dentry *proc_lookupfd_mnt(struct inode *dir,
 					   struct dentry *dentry,
 					   unsigned int flags)
 {
-	unsigned mnt_id = name_to_int(dentry);
+	unsigned mnt_id = name_to_int(&dentry->d_name);
 	struct task_struct *task;
 	int result;
 
