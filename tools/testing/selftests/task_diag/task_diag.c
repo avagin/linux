@@ -1,0 +1,72 @@
+
+/* getdelays.c
+ *
+ * Utility to get per-pid and per-tgid delay accounting statistics
+ * Also illustrates usage of the taskstats interface
+ *
+ * Copyright (C) Shailabh Nagar, IBM Corp. 2005
+ * Copyright (C) Balbir Singh, IBM Corp. 2006
+ * Copyright (c) Jay Lan, SGI. 2006
+ *
+ * Compile with
+ *	gcc -I/usr/src/linux/include getdelays.c -o getdelays
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <unistd.h>
+#include <poll.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <signal.h>
+
+#include <linux/genetlink.h>
+#include "taskdiag.h"
+#include "task_diag_comm.h"
+
+int main(int argc, char *argv[])
+{
+	int rc, rep_len, id;
+	int nl_sd = -1;
+	struct {
+		struct task_diag_pid req;
+		int pids[2];
+	} pid_req;
+	char buf[4096];
+
+	pid_req.req.show_flags = TASK_DIAG_SHOW_PIDS | TASK_DIAG_SHOW_COMM | TASK_DIAG_SHOW_CRED;
+	pid_req.req.num = 2;
+	pid_req.req.pids[0] = 1;
+	pid_req.req.pids[1] = getpid();
+
+	nl_sd = create_nl_socket(NETLINK_GENERIC);
+	if (nl_sd < 0)
+		return -1;
+
+	id = get_family_id(nl_sd);
+	if (!id)
+		goto err;
+
+	rc = send_cmd(nl_sd, id, getpid(), TASKDIAG_CMD_GET,
+		      TASKDIAG_CMD_ATTR_GET, &pid_req, sizeof(pid_req), 0);
+	pr_info("Sent pid/tgid, retval %d\n", rc);
+	if (rc < 0)
+		goto err;
+
+	rep_len = recv(nl_sd, buf, sizeof(buf), 0);
+	if (rep_len < 0) {
+		pr_perror("Unable to receive a response\n");
+		goto err;
+	}
+	pr_info("received %d bytes\n", rep_len);
+
+	nlmsg_receive(buf, rep_len, &show_task);
+err:
+	close(nl_sd);
+	return 0;
+}

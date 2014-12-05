@@ -82,4 +82,15 @@ static inline struct proc_dir_entry *proc_net_mkdir(
 	return proc_mkdir_data(name, 0, parent, net);
 }
 
+struct tgid_iter {
+	unsigned int tgid;
+	struct task_struct *task;
+};
+
+struct tgid_iter next_tgid(struct pid_namespace *ns, struct tgid_iter iter);
+
+bool has_pid_permissions(struct pid_namespace *pid,
+				 struct task_struct *task,
+				 int hide_pid_min);
+
 #endif /* _LINUX_PROC_FS_H */
