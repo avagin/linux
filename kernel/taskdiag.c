@@ -23,8 +23,6 @@ static size_t taskdiag_packet_size(u64 show_flags)
 	if (show_flags & TASK_DIAG_SHOW_CRED)
 		size += nla_total_size(sizeof(struct task_diag_creds));
 
-	/* TODO for waht? */
-	size += nla_total_size(0);
 	return size;
 }
 
