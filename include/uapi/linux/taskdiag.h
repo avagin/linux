@@ -14,6 +14,10 @@ enum {
 	TASK_DIAG_CRED,
 };
 
+#define TASK_DIAG_SHOW_PIDS (1ULL << TASK_DIAG_PIDS)
+#define TASK_DIAG_SHOW_COMM (1ULL << TASK_DIAG_COMM)
+#define TASK_DIAG_SHOW_CRED (1ULL << TASK_DIAG_CRED)
+
 enum {
 	TASK_DIAG_RUNNING,
 	TASK_DIAG_INTERRUPTIBLE,
@@ -63,6 +67,11 @@ enum {
 	__TASKDIAG_CMD_MAX,
 };
 #define TASKDIAG_CMD_MAX (__TASKDIAG_CMD_MAX - 1)
+
+struct task_diag_pid {
+	__u32	pid;
+	__u64	show_flags;
+};
 
 enum {
 	TASKDIAG_CMD_ATTR_UNSPEC = 0,

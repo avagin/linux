@@ -11,14 +11,20 @@ static struct genl_family family = {
 	.netnsok	= true,
 };
 
-static size_t taskdiag_packet_size(void)
+static size_t taskdiag_packet_size(u64 show_flags)
 {
 	size_t size;
 
-	size = nla_total_size(sizeof(u32)) +
-		nla_total_size(sizeof(struct task_diag_pids)) +
-		nla_total_size(sizeof(struct task_diag_comm)) +
-		nla_total_size(sizeof(struct task_diag_creds)) + nla_total_size(0);
+	size = nla_total_size(sizeof(u32));
+	if (show_flags & TASK_DIAG_SHOW_PIDS)
+		size += nla_total_size(sizeof(struct task_diag_pids));
+	if (show_flags & TASK_DIAG_SHOW_COMM)
+		size += nla_total_size(sizeof(struct task_diag_comm));
+	if (show_flags & TASK_DIAG_SHOW_CRED)
+		size += nla_total_size(sizeof(struct task_diag_creds));
+
+	/* TODO for waht? */
+	size += nla_total_size(0);
 	return size;
 }
 
@@ -27,7 +33,7 @@ void fill_pids(struct task_struct *p, struct task_diag_pids *pids)
 	pid_t ppid, tpid;
 	struct pid_namespace *ns = task_active_pid_ns(current);
 
-	rcu_read_lock(); // WHY
+	rcu_read_lock();
 	ppid = pid_alive(p) ?
 		task_tgid_nr_ns(rcu_dereference(p->real_parent), ns) : 0;
 	tpid = 0;
@@ -90,13 +96,12 @@ static void fill_creds(struct task_struct *p, struct task_diag_creds *diag_cred)
 	const struct cred *cred;
 	struct user_namespace *user_ns = current_user_ns();
 
-	rcu_read_lock();
-	cred = __task_cred(p);
+	cred = get_task_cred(p);
+
 	caps2diag(&diag_cred->cap_inheritable, &cred->cap_inheritable);
 	caps2diag(&diag_cred->cap_permitted, &cred->cap_permitted);
 	caps2diag(&diag_cred->cap_effective, &cred->cap_effective);
 	caps2diag(&diag_cred->cap_bset, &cred->cap_bset);
-	rcu_read_unlock();
 
 	diag_cred->uid   = from_kuid_munged(user_ns, cred->uid);
 	diag_cred->euid  = from_kuid_munged(user_ns, cred->euid);
@@ -132,9 +137,6 @@ static int prepare_reply(struct genl_info *info, u8 cmd, struct sk_buff **skbp,
 	return 0;
 }
 
-/*
- * Send taskstats data in @skb to listener with nl_pid @pid
- */
 static int send_reply(struct sk_buff *skb, struct genl_info *info)
 {
 	struct genlmsghdr *genlhdr = nlmsg_data(nlmsg_hdr(skb));
@@ -156,24 +158,22 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 	struct nlattr *attr;
 	struct task_struct *tsk = NULL;
 	size_t size;
-	pid_t pid;
+	struct task_diag_pid *pid_req;
 	int rc;
 
-	if (!info->attrs[TASKDIAG_CMD_ATTR_PID])
+	if (!info->attrs[TASKDIAG_CMD_ATTR_PID] ||
+	    nla_len(info->attrs[TASKDIAG_CMD_ATTR_PID]) < sizeof(*pid_req))
 		return -EINVAL;
 
-	size = taskdiag_packet_size();
+	pid_req = nla_data(info->attrs[TASKDIAG_CMD_ATTR_PID]);
 
+	size = taskdiag_packet_size(pid_req->show_flags);
 	rc = prepare_reply(info, TASKDIAG_CMD_NEW, &rep_skb, size);
 	if (rc < 0)
 		return rc;
 
-	pid = nla_get_u32(info->attrs[TASKDIAG_CMD_ATTR_PID]);
-	if (nla_put(rep_skb, TASK_DIAG_PID, sizeof(pid), &pid) < 0)
-		goto err;
-
 	rcu_read_lock();
-	tsk = find_task_by_vpid(pid);
+	tsk = find_task_by_vpid(pid_req->pid);
 	if (tsk)
 		get_task_struct(tsk);
 	rcu_read_unlock();
@@ -182,23 +182,29 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 		goto err;
 	};
 
-	attr = nla_reserve(rep_skb, TASK_DIAG_PIDS, sizeof(struct task_diag_pids));
-	if (!attr)
-		goto err;
+	if (pid_req->show_flags & TASK_DIAG_SHOW_PIDS) {
+		attr = nla_reserve(rep_skb, TASK_DIAG_PIDS, sizeof(struct task_diag_pids));
+		if (!attr)
+			goto err;
 
-	fill_pids(tsk, nla_data(attr));
+		fill_pids(tsk, nla_data(attr));
+	}
 
-	attr = nla_reserve(rep_skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm));
-	if (!attr)
-		goto err;
+	if (pid_req->show_flags & TASK_DIAG_SHOW_COMM) {
+		attr = nla_reserve(rep_skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm));
+		if (!attr)
+			goto err;
 
-	fill_comm(tsk, nla_data(attr));
+		fill_comm(tsk, nla_data(attr));
+	}
 
-	attr = nla_reserve(rep_skb, TASK_DIAG_CRED, sizeof(struct task_diag_creds));
-	if (!attr)
-		goto err;
+	if (pid_req->show_flags & TASK_DIAG_SHOW_CRED) {
+		attr = nla_reserve(rep_skb, TASK_DIAG_CRED, sizeof(struct task_diag_creds));
+		if (!attr)
+			goto err;
 
-	fill_creds(tsk, nla_data(attr));
+		fill_creds(tsk, nla_data(attr));
+	}
 
 	put_task_struct(tsk);
 

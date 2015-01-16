@@ -182,7 +182,11 @@ int main(int argc, char *argv[])
 	__u32 mypid;
 	int nl_sd = -1;
 	int len = 0;
-	pid_t tid = getpid();
+	struct task_diag_pid pid_req = {
+			.pid = getpid(),
+			.show_flags = TASK_DIAG_SHOW_PIDS |
+					TASK_DIAG_SHOW_COMM
+	};
 
 	struct nlattr *na;
 	struct msgtemplate msg;
@@ -201,10 +205,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Error getting family id, errno %d\n", errno);
 		goto err;
 	}
-	PRINTF("family id %d\n", id);
 
 	rc = send_cmd(nl_sd, id, mypid, TASKDIAG_CMD_GET,
-		      TASKDIAG_CMD_ATTR_PID, &tid, sizeof(__u32));
+		      TASKDIAG_CMD_ATTR_PID, &pid_req, sizeof(pid_req));
 	PRINTF("Sent pid/tgid, retval %d\n", rc);
 	if (rc < 0) {
 		fprintf(stderr, "error sending tid/tgid cmd\n");
@@ -240,7 +243,6 @@ int main(int argc, char *argv[])
 		len = 0;
 		while (len < rep_len) {
 			len += NLA_ALIGN(na->nla_len);
-			printf("%d\n", na->nla_type);
 			switch (na->nla_type) {
 			case TASK_DIAG_PID:
 				break;
