@@ -112,7 +112,7 @@ static void fill_creds(struct task_struct *p, struct task_diag_creds *diag_cred)
 
 }
 
-static int prepare_reply(struct genl_info *info, u8 cmd, struct sk_buff **skbp,
+static int prepare_reply(struct sk_buff *in_skb, struct genl_info *info, u8 cmd, struct sk_buff **skbp,
 				size_t size)
 {
 	struct sk_buff *skb;
@@ -121,7 +121,8 @@ static int prepare_reply(struct genl_info *info, u8 cmd, struct sk_buff **skbp,
 	/*
 	 * If new attributes are added, please revisit this allocation
 	 */
-	skb = genlmsg_new(size, GFP_KERNEL);
+//	skb = genlmsg_new(size, GFP_KERNEL);
+	skb = netlink_alloc_skb(in_skb->sk, size, NETLINK_CB(in_skb).portid, GFP_KERNEL);
 	if (!skb)
 		return -ENOMEM;
 
@@ -166,7 +167,7 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 	pid_req = nla_data(info->attrs[TASKDIAG_CMD_ATTR_PID]);
 
 	size = taskdiag_packet_size(pid_req->show_flags);
-	rc = prepare_reply(info, TASKDIAG_CMD_NEW, &rep_skb, size);
+	rc = prepare_reply(skb, info, TASKDIAG_CMD_NEW, &rep_skb, size);
 	if (rc < 0)
 		return rc;
 

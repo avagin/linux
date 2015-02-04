@@ -26,9 +26,14 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <linux/socket.h>
+#include <sys/mman.h>
 
 #include <linux/genetlink.h>
 #include "taskdiag.h"
+
+#define SOL_NETLINK     270
 
 /*
  * Generic macros for dealing with netlink sockets. Might be duplicated
@@ -177,6 +182,99 @@ static int get_family_id(int sd)
 	return id;
 }
 
+int frame_size = 16384;
+unsigned int ring_size;
+void *rx_ring, *tx_ring;
+void set_rings(int fd)
+{
+	unsigned int block_size = 16 * getpagesize();
+	struct nl_mmap_req req = {
+		.nm_block_size		= block_size,
+		.nm_block_nr		= 64,
+		.nm_frame_size		= 16384,
+		.nm_frame_nr		= 64 * block_size / 16384,
+	};
+
+	/* Configure ring parameters */
+	if (setsockopt(fd, SOL_NETLINK, NETLINK_RX_RING, &req, sizeof(req)) < 0)
+		exit(1);
+	if (setsockopt(fd, SOL_NETLINK, NETLINK_TX_RING, &req, sizeof(req)) < 0)
+		exit(1);
+
+	/* Calculate size of each individual ring */
+	ring_size = req.nm_block_nr * req.nm_block_size;
+
+	/* Map RX/TX rings. The TX ring is located after the RX ring */
+	rx_ring = mmap(NULL, 2 * ring_size, PROT_READ | PROT_WRITE,
+		       MAP_SHARED, fd, 0);
+	if ((long)rx_ring == -1L)
+		exit(1);
+	tx_ring = rx_ring + ring_size;
+}
+
+void recv_msg(int fd)
+{
+	static unsigned int frame_offset = 0;
+	struct nl_mmap_hdr *hdr;
+	struct nlmsghdr *nlh;
+	unsigned char buf[16384];
+	ssize_t len;
+
+	while (1) {
+		struct pollfd pfds[1];
+
+		pfds[0].fd	= fd;
+		pfds[0].events	= POLLIN | POLLERR;
+		pfds[0].revents	= 0;
+
+		if (poll(pfds, 1, -1) < 0 && errno != -EINTR)
+			exit(1);
+
+		/* Check for errors. Error handling omitted */
+		if (pfds[0].revents & POLLERR)
+			exit(1);
+
+		/* If no new messages, poll again */
+		if (!(pfds[0].revents & POLLIN))
+			continue;
+
+		/* Process all frames */
+		while (1) {
+			/* Get next frame header */
+			hdr = rx_ring + frame_offset;
+
+			if (hdr->nm_status == NL_MMAP_STATUS_VALID) {
+				/* Regular memory mapped frame */
+				nlh = (void *)hdr + NL_MMAP_HDRLEN;
+				len = hdr->nm_len;
+
+				/* Release empty message immediately. May happen
+				 * on error during message construction.
+				 */
+				if (len == 0)
+					goto release;
+			} else if (hdr->nm_status == NL_MMAP_STATUS_COPY) {
+				/* Frame queued to socket receive queue */
+				len = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+				if (len <= 0)
+					break;
+				nlh = (void *)buf;
+			} else
+				/* No more messages to process, continue polling */
+				break;
+
+//			process_msg(nlh);
+release:
+			/* Release frame back to the kernel */
+			hdr->nm_status = NL_MMAP_STATUS_UNUSED;
+
+			/* Advance frame offset to next frame */
+			frame_offset = (frame_offset + frame_size) % ring_size;
+			return;
+		}
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int rc, rep_len;//, aggr_len;
@@ -208,6 +306,8 @@ int main(int argc, char *argv[])
 		goto err;
 	}
 
+	set_rings(nl_sd);
+
 	struct timeval start, end;
 	int i, j;
 	i = 0;
@@ -221,17 +321,15 @@ int main(int argc, char *argv[])
 		}
 
 		i++;
-		i++;
 
-		for (j = 0; j < 2; j++)
 		rc = send_cmd(nl_sd, id, 1 /*mypid*/, TASKDIAG_CMD_GET,
 			      TASKDIAG_CMD_ATTR_PID, &pid_req, sizeof(pid_req));
 		if (rc < 0) {
 			fprintf(stderr, "error sending tid/tgid cmd\n");
 			goto done;
 		}
-
-		for (j = 0; j < 2; j++)
+		recv_msg(nl_sd);
+#if 0
 		do {
 			rep_len = recv(nl_sd, &msg, sizeof(msg), 0);
 
@@ -299,6 +397,7 @@ int main(int argc, char *argv[])
 			}
 	#endif
 		} while (0);
+#endif
 	}
 
 	int fd, fd_self;
