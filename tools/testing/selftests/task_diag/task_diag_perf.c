@@ -106,6 +106,8 @@ error:
 }
 
 
+//		rc = send_cmd(nl_sd, id, 1 /*mypid*/, TASKDIAG_CMD_GET,
+//			      TASKDIAG_CMD_ATTR_PID, &pid_req, sizeof(pid_req));
 static int send_cmd(int sd, __u16 nlmsg_type, __u32 nlmsg_pid,
 	     __u8 genl_cmd, __u16 nla_type,
 	     void *nla_data, int nla_len)
@@ -210,6 +212,59 @@ void set_rings(int fd)
 	if ((long)rx_ring == -1L)
 		exit(1);
 	tx_ring = rx_ring + ring_size;
+}
+
+void build_message(void *data, __u16 nlmsg_type, __u32 nlmsg_pid,
+		 __u8 genl_cmd, __u16 nla_type,
+		void *nla_data, int nla_len)
+{
+	struct msgtemplate *msg = data;
+	struct nlattr *na;
+
+	msg->n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
+	msg->n.nlmsg_type = nlmsg_type;
+	msg->n.nlmsg_flags = NLM_F_REQUEST;
+	msg->n.nlmsg_seq = 0;
+	msg->n.nlmsg_pid = nlmsg_pid;
+	msg->g.cmd = genl_cmd;
+	msg->g.version = 0x1;
+	na = (struct nlattr *) GENLMSG_DATA(msg);
+	na->nla_type = nla_type;
+	na->nla_len = nla_len + 1 + NLA_HDRLEN;
+	memcpy(NLA_DATA(na), nla_data, nla_len);
+	msg->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
+}
+
+int send_msg(int fd, __u16 nlmsg_type, __u32 nlmsg_pid,
+		__u8 genl_cmd, __u16 nla_type,
+		void *nla_data, int nla_len)
+{
+	static unsigned int frame_offset = 0;
+	struct nl_mmap_hdr *hdr;
+	struct nlmsghdr *nlh;
+	struct sockaddr_nl addr = {
+		.nl_family	= AF_NETLINK,
+	};
+
+	hdr = tx_ring + frame_offset;
+	if (hdr->nm_status != NL_MMAP_STATUS_UNUSED)
+		/* No frame available. Use poll() to avoid. */
+		exit(1);
+
+	nlh = (void *)hdr + NL_MMAP_HDRLEN;
+
+	/* Build message */
+	build_message(nlh, nlmsg_type, nlmsg_pid, genl_cmd, nla_type, nla_data, nla_len);
+
+	/* Fill frame header: length and status need to be set */
+	hdr->nm_len	= nlh->nlmsg_len;
+	hdr->nm_status	= NL_MMAP_STATUS_VALID;
+
+	if (sendto(fd, NULL, 0, 0, (struct sockaddr *) &addr, sizeof(addr)) < 0)
+		exit(1);
+
+	/* Advance frame offset to next frame */
+	frame_offset = (frame_offset + frame_size) % ring_size;
 }
 
 void recv_msg(int fd)
