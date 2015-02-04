@@ -116,7 +116,6 @@ static int prepare_reply(struct sk_buff *in_skb, struct genl_info *info, u8 cmd,
 				size_t size)
 {
 	struct sk_buff *skb;
-	void *reply;
 
 	/*
 	 * If new attributes are added, please revisit this allocation
@@ -125,12 +124,6 @@ static int prepare_reply(struct sk_buff *in_skb, struct genl_info *info, u8 cmd,
 	skb = netlink_alloc_skb(in_skb->sk, size, NETLINK_CB(in_skb).portid, GFP_KERNEL);
 	if (!skb)
 		return -ENOMEM;
-
-	reply = genlmsg_put_reply(skb, info, &family, 0, cmd);
-	if (reply == NULL) {
-		nlmsg_free(skb);
-		return -EINVAL;
-	}
 
 	*skbp = skb;
 	return 0;
@@ -151,10 +144,50 @@ static int send_reply(struct sk_buff *skb, struct genl_info *info)
 	return genlmsg_reply(skb, info);
 }
 
+static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb, u64 show_flags, struct genl_info *info, u8 cmd)
+{
+	struct nlattr *attr;
+	void *reply;
+
+	reply = genlmsg_put_reply(skb, info, &family, 0, cmd);
+	if (reply == NULL) {
+		nlmsg_free(skb);
+		return -EMSGSIZE;
+	}
+
+	if (show_flags & TASK_DIAG_SHOW_PIDS) {
+		attr = nla_reserve(skb, TASK_DIAG_PIDS, sizeof(struct task_diag_pids));
+		if (!attr)
+			goto err;
+
+		fill_pids(tsk, nla_data(attr));
+	}
+
+	if (show_flags & TASK_DIAG_SHOW_COMM) {
+		attr = nla_reserve(skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm));
+		if (!attr)
+			goto err;
+
+		fill_comm(tsk, nla_data(attr));
+	}
+
+	if (show_flags & TASK_DIAG_SHOW_CRED) {
+		attr = nla_reserve(skb, TASK_DIAG_CRED, sizeof(struct task_diag_creds));
+		if (!attr)
+			goto err;
+
+		fill_creds(tsk, nla_data(attr));
+	}
+
+	return genlmsg_end(skb, reply);
+err:
+	genlmsg_cancel(skb, reply);
+	return -EMSGSIZE;
+}
+
 static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 {
 	struct sk_buff *rep_skb;
-	struct nlattr *attr;
 	struct task_struct *tsk = NULL;
 	size_t size;
 	struct task_diag_pid *pid_req;
@@ -181,36 +214,13 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 		goto err;
 	};
 
-	if (pid_req->show_flags & TASK_DIAG_SHOW_PIDS) {
-		attr = nla_reserve(rep_skb, TASK_DIAG_PIDS, sizeof(struct task_diag_pids));
-		if (!attr)
-			goto err;
-
-		fill_pids(tsk, nla_data(attr));
-	}
-
-	if (pid_req->show_flags & TASK_DIAG_SHOW_COMM) {
-		attr = nla_reserve(rep_skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm));
-		if (!attr)
-			goto err;
-
-		fill_comm(tsk, nla_data(attr));
-	}
-
-	if (pid_req->show_flags & TASK_DIAG_SHOW_CRED) {
-		attr = nla_reserve(rep_skb, TASK_DIAG_CRED, sizeof(struct task_diag_creds));
-		if (!attr)
-			goto err;
-
-		fill_creds(tsk, nla_data(attr));
-	}
-
+	rc = task_diag_fill(tsk, rep_skb, pid_req->show_flags, info, TASKDIAG_CMD_NEW);
 	put_task_struct(tsk);
+	if (rc < 0)
+		goto err;
 
 	return send_reply(rep_skb, info);
 err:
-	if (tsk)
-		put_task_struct(tsk);
 	nlmsg_free(rep_skb);
 	return rc;
 }
