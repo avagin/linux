@@ -112,39 +112,8 @@ static void fill_creds(struct task_struct *p, struct task_diag_creds *diag_cred)
 
 }
 
-static int prepare_reply(struct sk_buff *in_skb, struct genl_info *info, u8 cmd, struct sk_buff **skbp,
-				size_t size)
-{
-	struct sk_buff *skb;
-
-	/*
-	 * If new attributes are added, please revisit this allocation
-	 */
-//	skb = genlmsg_new(size, GFP_KERNEL);
-	skb = netlink_alloc_skb(in_skb->sk, size, NETLINK_CB(in_skb).portid, GFP_KERNEL);
-	if (!skb)
-		return -ENOMEM;
-
-	*skbp = skb;
-	return 0;
-}
-
-static int send_reply(struct sk_buff *skb, struct genl_info *info)
-{
-	struct genlmsghdr *genlhdr = nlmsg_data(nlmsg_hdr(skb));
-	void *reply = genlmsg_data(genlhdr);
-	int rc;
-
-	rc = genlmsg_end(skb, reply);
-	if (rc < 0) {
-		nlmsg_free(skb);
-		return rc;
-	}
-
-	return genlmsg_reply(skb, info);
-}
-
-static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb, u64 show_flags, struct genl_info *info, u8 cmd)
+static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
+				u64 show_flags, struct genl_info *info, u8 cmd)
 {
 	struct nlattr *attr;
 	void *reply;
@@ -200,9 +169,10 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 	pid_req = nla_data(info->attrs[TASKDIAG_CMD_ATTR_PID]);
 
 	size = taskdiag_packet_size(pid_req->show_flags);
-	rc = prepare_reply(skb, info, TASKDIAG_CMD_NEW, &rep_skb, size);
-	if (rc < 0)
-		return rc;
+//	rep_skb = genlmsg_new(size, GFP_KERNEL);
+	rep_skb = netlink_alloc_skb(skb->sk, size, NETLINK_CB(skb).portid, GFP_KERNEL);
+	if (!rep_skb)
+		return -ENOMEM;
 
 	rcu_read_lock();
 	tsk = find_task_by_vpid(pid_req->pid);
@@ -219,7 +189,7 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 	if (rc < 0)
 		goto err;
 
-	return send_reply(rep_skb, info);
+	return genlmsg_reply(rep_skb, info);
 err:
 	nlmsg_free(rep_skb);
 	return rc;
