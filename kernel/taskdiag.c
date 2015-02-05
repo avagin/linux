@@ -158,7 +158,7 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 {
 	struct sk_buff *rep_skb;
 	struct task_struct *tsk = NULL;
-	size_t size;
+	size_t size, i;
 	struct task_diag_pid *pid_req;
 	int rc;
 
@@ -168,26 +168,32 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 
 	pid_req = nla_data(info->attrs[TASKDIAG_CMD_ATTR_PID]);
 
-	size = taskdiag_packet_size(pid_req->show_flags);
+	size = sizeof(*pid_req) + sizeof(pid_req->pids[0]) * pid_req->num;
+	if (nla_len(info->attrs[TASKDIAG_CMD_ATTR_PID]) < size)
+		return -EINVAL;
+
+	size = taskdiag_packet_size(pid_req->show_flags) * pid_req->num;;
 //	rep_skb = genlmsg_new(size, GFP_KERNEL);
 	rep_skb = netlink_alloc_skb(skb->sk, size, NETLINK_CB(skb).portid, GFP_KERNEL);
 	if (!rep_skb)
 		return -ENOMEM;
 
-	rcu_read_lock();
-	tsk = find_task_by_vpid(pid_req->pid);
-	if (tsk)
-		get_task_struct(tsk);
-	rcu_read_unlock();
-	if (!tsk) {
-		rc = -ESRCH;
-		goto err;
-	};
+	for (i = 0; i < pid_req->num; i++) {
+		rcu_read_lock();
+		tsk = find_task_by_vpid(pid_req->pids[i]);
+		if (tsk)
+			get_task_struct(tsk);
+		rcu_read_unlock();
+		if (!tsk) {
+			rc = -ESRCH;
+			goto err;
+		};
 
-	rc = task_diag_fill(tsk, rep_skb, pid_req->show_flags, info, TASKDIAG_CMD_NEW);
-	put_task_struct(tsk);
-	if (rc < 0)
-		goto err;
+		rc = task_diag_fill(tsk, rep_skb, pid_req->show_flags, info, TASKDIAG_CMD_NEW);
+		put_task_struct(tsk);
+		if (rc < 0)
+			goto err;
+	}
 
 	return genlmsg_reply(rep_skb, info);
 err:
@@ -196,7 +202,7 @@ err:
 }
 
 static const struct nla_policy taskstats_cmd_get_policy[TASKDIAG_CMD_ATTR_MAX+1] = {
-		[TASKDIAG_CMD_ATTR_PID]  = { .type = NLA_U32 },
+		[TASKDIAG_CMD_ATTR_PID]  = { .type = NLA_BINARY },
 	};
 
 static const struct genl_ops taskdiag_ops[] = {

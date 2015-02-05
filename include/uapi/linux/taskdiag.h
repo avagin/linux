@@ -69,8 +69,9 @@ enum {
 #define TASKDIAG_CMD_MAX (__TASKDIAG_CMD_MAX - 1)
 
 struct task_diag_pid {
-	__u32	pid;
 	__u64	show_flags;
+	__u32	num;
+	__u32	pids[0];
 };
 
 enum {
