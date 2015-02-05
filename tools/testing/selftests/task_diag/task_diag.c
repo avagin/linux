@@ -310,16 +310,6 @@ int main(int argc, char *argv[])
 			errno);
 		goto err;
 	}
-	if (msg.n.nlmsg_type == NLMSG_ERROR ||
-	    !NLMSG_OK((&msg.n), rep_len)) {
-		struct nlmsgerr *err = NLMSG_DATA(&msg);
-		fprintf(stderr, "fatal reply error,  errno %d\n",
-			err->error);
-		goto done;
-	}
-
-	PRINTF("nlmsghdr size=%zu, nlmsg_len=%d, rep_len=%d\n",
-	       sizeof(struct nlmsghdr), msg.n.nlmsg_len, rep_len);
 
 	nlmsg_receive(&msg, rep_len, &show_task);
 done:
