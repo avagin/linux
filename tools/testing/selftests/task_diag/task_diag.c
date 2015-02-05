@@ -175,21 +175,105 @@ static int get_family_id(int sd)
 	return id;
 }
 
+static int nlmsg_receive(void *buf, int len, int (*cb)(struct nlmsghdr *))
+{
+	struct nlmsghdr *hdr;
+
+	for (hdr = (struct nlmsghdr *)buf; NLMSG_OK(hdr, len); hdr = NLMSG_NEXT(hdr, len)) {
+		if (hdr->nlmsg_type == NLMSG_DONE) {
+			int *len = (int *)NLMSG_DATA(hdr);
+
+			if (*len < 0) {
+				printf("ERROR %d reported by netlink (%s)\n",
+					*len, strerror(-*len));
+				return *len;
+			}
+
+			return 0;
+		}
+		if (hdr->nlmsg_type == NLMSG_ERROR) {
+			struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(hdr);
+
+			if (hdr->nlmsg_len - sizeof(*hdr) < sizeof(struct nlmsgerr)) {
+				printf("ERROR truncated\n");
+				return -1;
+			}
+
+			if (err->error == 0)
+				return 0;
+
+			return -1;
+		}
+		if (cb(hdr))
+			return -1;
+	}
+
+	return 1;
+}
+
+int show_task(struct nlmsghdr *hdr)
+{
+	int msg_len;
+	struct msgtemplate *p;
+	struct nlattr *na;
+	int len;
+
+	msg_len = GENLMSG_PAYLOAD(hdr);
+
+	p = (struct msgtemplate *)hdr;
+	na = (struct nlattr *) GENLMSG_DATA(p);
+	len = 0;
+	while (len < msg_len) {
+		len += NLA_ALIGN(na->nla_len);
+		switch (na->nla_type) {
+		case TASK_DIAG_PID:
+			break;
+		case TASK_DIAG_PIDS:
+		{
+			struct task_diag_pids *pids;
+
+			/* For nested attributes, na follows */
+			pids = (struct task_diag_pids *) NLA_DATA(na);
+			printf("ppid %d\n", pids->ppid);
+			break;
+		}
+		case TASK_DIAG_COMM:
+		{
+			struct task_diag_comm *comm;
+			comm = (struct task_diag_comm *) NLA_DATA(na);
+			printf("state %d\n", comm->state);
+			break;
+		}
+		case TASK_DIAG_CRED:
+		{
+			struct task_diag_creds *creds;
+			creds = (struct task_diag_creds *) NLA_DATA(na);
+			printf("uid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
+			printf("gid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
+			break;
+		}
+		default:
+			fprintf(stderr, "Unknown nla_type %d\n",
+				na->nla_type);
+		}
+		na = (struct nlattr *) (GENLMSG_DATA(p) + len);
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int rc, rep_len;
 	__u16 id;
 	__u32 mypid;
 	int nl_sd = -1;
-	int len = 0;
 	struct {
 		struct task_diag_pid req;
 		int pids[2];
 	} pid_req;
 
-	struct nlattr *na;
-	struct msgtemplate msg, *p;
-	struct nlmsghdr *hdr;
+	struct msgtemplate msg;
 
 	pid_req.req.show_flags = TASK_DIAG_SHOW_PIDS | TASK_DIAG_SHOW_COMM | TASK_DIAG_SHOW_CRED;
 	pid_req.req.num = 2;
@@ -218,72 +302,26 @@ int main(int argc, char *argv[])
 		goto done;
 	}
 
-		rep_len = recv(nl_sd, &msg, sizeof(msg), 0);
-		PRINTF("received %d bytes\n", rep_len);
+	rep_len = recv(nl_sd, &msg, sizeof(msg), 0);
+	PRINTF("received %d bytes\n", rep_len);
 
-		if (rep_len < 0) {
-			fprintf(stderr, "nonfatal reply error: errno %d\n",
-				errno);
-			goto err;
-		}
-		if (msg.n.nlmsg_type == NLMSG_ERROR ||
-		    !NLMSG_OK((&msg.n), rep_len)) {
-			struct nlmsgerr *err = NLMSG_DATA(&msg);
-			fprintf(stderr, "fatal reply error,  errno %d\n",
-				err->error);
-			goto done;
-		}
-
-		PRINTF("nlmsghdr size=%zu, nlmsg_len=%d, rep_len=%d\n",
-		       sizeof(struct nlmsghdr), msg.n.nlmsg_len, rep_len);
-
-	p = &msg;
-	for (hdr = (struct nlmsghdr *)&msg.n; NLMSG_OK(hdr, rep_len); hdr = NLMSG_NEXT(hdr, rep_len)) {
-		int msg_len;
-
-		msg_len = GENLMSG_PAYLOAD(&msg.n);
-		PRINTF("nlmsghdr size=%zu, nlmsg_len=%d, msg_len=%d\n",
-		       sizeof(struct nlmsghdr), msg.n.nlmsg_len, msg_len);
-
-		p = (struct msgtemplate *)hdr;
-		na = (struct nlattr *) GENLMSG_DATA(p);
-		len = 0;
-		while (len < msg_len) {
-			len += NLA_ALIGN(na->nla_len);
-			switch (na->nla_type) {
-			case TASK_DIAG_PID:
-				break;
-			case TASK_DIAG_PIDS:
-			{
-				struct task_diag_pids *pids;
-
-				/* For nested attributes, na follows */
-				pids = (struct task_diag_pids *) NLA_DATA(na);
-				printf("ppid %d\n", pids->ppid);
-				break;
-			}
-			case TASK_DIAG_COMM:
-			{
-				struct task_diag_comm *comm;
-				comm = (struct task_diag_comm *) NLA_DATA(na);
-				printf("state %d\n", comm->state);
-				break;
-			}
-			case TASK_DIAG_CRED:
-			{
-				struct task_diag_creds *creds;
-				creds = (struct task_diag_creds *) NLA_DATA(na);
-				printf("uid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
-				printf("gid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
-				break;
-			}
-			default:
-				fprintf(stderr, "Unknown nla_type %d\n",
-					na->nla_type);
-			}
-			na = (struct nlattr *) (GENLMSG_DATA(p) + len);
-		}
+	if (rep_len < 0) {
+		fprintf(stderr, "nonfatal reply error: errno %d\n",
+			errno);
+		goto err;
 	}
+	if (msg.n.nlmsg_type == NLMSG_ERROR ||
+	    !NLMSG_OK((&msg.n), rep_len)) {
+		struct nlmsgerr *err = NLMSG_DATA(&msg);
+		fprintf(stderr, "fatal reply error,  errno %d\n",
+			err->error);
+		goto done;
+	}
+
+	PRINTF("nlmsghdr size=%zu, nlmsg_len=%d, rep_len=%d\n",
+	       sizeof(struct nlmsghdr), msg.n.nlmsg_len, rep_len);
+
+	nlmsg_receive(&msg, rep_len, &show_task);
 done:
 err:
 	close(nl_sd);
