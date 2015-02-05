@@ -202,7 +202,7 @@ err:
 }
 
 static const struct nla_policy taskstats_cmd_get_policy[TASKDIAG_CMD_ATTR_MAX+1] = {
-		[TASKDIAG_CMD_ATTR_PID]  = { .type = NLA_BINARY },
+		[TASKDIAG_CMD_ATTR_PID]  = { .type = NLA_U32 },//, .len = sizeof(struct task_diag_pid)},
 	};
 
 static const struct genl_ops taskdiag_ops[] = {
