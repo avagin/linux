@@ -25,15 +25,9 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <sys/time.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <linux/socket.h>
-#include <sys/mman.h>
 
 #include <linux/genetlink.h>
 #include "taskdiag.h"
-
-#define SOL_NETLINK     270
 
 /*
  * Generic macros for dealing with netlink sockets. Might be duplicated
@@ -51,26 +45,9 @@
 		exit(code);			\
 	} while (0)
 
-int done;
-int rcvbufsz;
-char name[100];
-int dbg = 1;
-
-#define PRINTF(fmt, arg...) {			\
-	    if (dbg) {				\
-		printf(fmt, ##arg);		\
-	    }					\
-	}
-
-/* Maximum size of response requested or message sent */
-#define MAX_MSG_SIZE	1024
-/* Maximum number of cpus expected to be specified in a cpumask */
-#define MAX_CPUS	32
-
 struct msgtemplate {
 	struct nlmsghdr n;
 	struct genlmsghdr g;
-	char buf[MAX_MSG_SIZE];
 };
 
 /*
@@ -85,14 +62,6 @@ static int create_nl_socket(int protocol)
 	if (fd < 0)
 		return -1;
 
-	if (rcvbufsz)
-		if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF,
-				&rcvbufsz, sizeof(rcvbufsz)) < 0) {
-			fprintf(stderr, "Unable to set socket rcv buf size to %d\n",
-				rcvbufsz);
-			goto error;
-		}
-
 	memset(&local, 0, sizeof(local));
 	local.nl_family = AF_NETLINK;
 
@@ -106,8 +75,6 @@ error:
 }
 
 
-//		rc = send_cmd(nl_sd, id, 1 /*mypid*/, TASKDIAG_CMD_GET,
-//			      TASKDIAG_CMD_ATTR_PID, &pid_req, sizeof(pid_req));
 static int send_cmd(int sd, __u16 nlmsg_type, __u32 nlmsg_pid,
 	     __u8 genl_cmd, __u16 nla_type,
 	     void *nla_data, int nla_len)
@@ -163,6 +130,7 @@ static int get_family_id(int sd)
 	int id = 0, rc;
 	struct nlattr *na;
 	int rep_len;
+	char name[100];
 
 	strcpy(name, TASKDIAG_GENL_NAME);
 	rc = send_cmd(sd, GENL_ID_CTRL, getpid(), CTRL_CMD_GETFAMILY,
@@ -184,168 +152,117 @@ static int get_family_id(int sd)
 	return id;
 }
 
-int frame_size = 16384;
-unsigned int ring_size;
-void *rx_ring, *tx_ring;
-void set_rings(int fd)
+static int nlmsg_receive(void *buf, int len, int (*cb)(struct nlmsghdr *))
 {
-	unsigned int block_size = 16 * getpagesize();
-	struct nl_mmap_req req = {
-		.nm_block_size		= block_size,
-		.nm_block_nr		= 64,
-		.nm_frame_size		= 16384,
-		.nm_frame_nr		= 64 * block_size / 16384,
-	};
+	struct nlmsghdr *hdr;
 
-	/* Configure ring parameters */
-	if (setsockopt(fd, SOL_NETLINK, NETLINK_RX_RING, &req, sizeof(req)) < 0)
-		exit(1);
-	if (setsockopt(fd, SOL_NETLINK, NETLINK_TX_RING, &req, sizeof(req)) < 0)
-		exit(1);
+	for (hdr = (struct nlmsghdr *)buf; NLMSG_OK(hdr, len); hdr = NLMSG_NEXT(hdr, len)) {
+		if (hdr->nlmsg_type == NLMSG_DONE) {
+			int *len = (int *)NLMSG_DATA(hdr);
 
-	/* Calculate size of each individual ring */
-	ring_size = req.nm_block_nr * req.nm_block_size;
+			if (*len < 0) {
+				printf("ERROR %d reported by netlink (%s)\n",
+					*len, strerror(-*len));
+				return *len;
+			}
 
-	/* Map RX/TX rings. The TX ring is located after the RX ring */
-	rx_ring = mmap(NULL, 2 * ring_size, PROT_READ | PROT_WRITE,
-		       MAP_SHARED, fd, 0);
-	if ((long)rx_ring == -1L)
-		exit(1);
-	tx_ring = rx_ring + ring_size;
-}
-
-void build_message(void *data, __u16 nlmsg_type, __u32 nlmsg_pid,
-		 __u8 genl_cmd, __u16 nla_type,
-		void *nla_data, int nla_len)
-{
-	struct msgtemplate *msg = data;
-	struct nlattr *na;
-
-	msg->n.nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
-	msg->n.nlmsg_type = nlmsg_type;
-	msg->n.nlmsg_flags = NLM_F_REQUEST;
-	msg->n.nlmsg_seq = 0;
-	msg->n.nlmsg_pid = nlmsg_pid;
-	msg->g.cmd = genl_cmd;
-	msg->g.version = 0x1;
-	na = (struct nlattr *) GENLMSG_DATA(msg);
-	na->nla_type = nla_type;
-	na->nla_len = nla_len + 1 + NLA_HDRLEN;
-	memcpy(NLA_DATA(na), nla_data, nla_len);
-	msg->n.nlmsg_len += NLMSG_ALIGN(na->nla_len);
-}
-
-int send_msg(int fd, __u16 nlmsg_type, __u32 nlmsg_pid,
-		__u8 genl_cmd, __u16 nla_type,
-		void *nla_data, int nla_len)
-{
-	static unsigned int frame_offset = 0;
-	struct nl_mmap_hdr *hdr;
-	struct nlmsghdr *nlh;
-	struct sockaddr_nl addr = {
-		.nl_family	= AF_NETLINK,
-	};
-
-	hdr = tx_ring + frame_offset;
-	if (hdr->nm_status != NL_MMAP_STATUS_UNUSED)
-		/* No frame available. Use poll() to avoid. */
-		exit(1);
-
-	nlh = (void *)hdr + NL_MMAP_HDRLEN;
-
-	/* Build message */
-	build_message(nlh, nlmsg_type, nlmsg_pid, genl_cmd, nla_type, nla_data, nla_len);
-
-	/* Fill frame header: length and status need to be set */
-	hdr->nm_len	= nlh->nlmsg_len;
-	hdr->nm_status	= NL_MMAP_STATUS_VALID;
-
-	if (sendto(fd, NULL, 0, 0, (struct sockaddr *) &addr, sizeof(addr)) < 0)
-		exit(1);
-
-	/* Advance frame offset to next frame */
-	frame_offset = (frame_offset + frame_size) % ring_size;
-}
-
-void recv_msg(int fd)
-{
-	static unsigned int frame_offset = 0;
-	struct nl_mmap_hdr *hdr;
-	struct nlmsghdr *nlh;
-	unsigned char buf[16384];
-	ssize_t len;
-
-	while (1) {
-		struct pollfd pfds[1];
-
-		pfds[0].fd	= fd;
-		pfds[0].events	= POLLIN | POLLERR;
-		pfds[0].revents	= 0;
-
-		if (poll(pfds, 1, -1) < 0 && errno != -EINTR)
-			exit(1);
-
-		/* Check for errors. Error handling omitted */
-		if (pfds[0].revents & POLLERR)
-			exit(1);
-
-		/* If no new messages, poll again */
-		if (!(pfds[0].revents & POLLIN))
-			continue;
-
-		/* Process all frames */
-		while (1) {
-			/* Get next frame header */
-			hdr = rx_ring + frame_offset;
-
-			if (hdr->nm_status == NL_MMAP_STATUS_VALID) {
-				/* Regular memory mapped frame */
-				nlh = (void *)hdr + NL_MMAP_HDRLEN;
-				len = hdr->nm_len;
-
-				/* Release empty message immediately. May happen
-				 * on error during message construction.
-				 */
-				if (len == 0)
-					goto release;
-			} else if (hdr->nm_status == NL_MMAP_STATUS_COPY) {
-				/* Frame queued to socket receive queue */
-				len = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
-				if (len <= 0)
-					break;
-				nlh = (void *)buf;
-			} else
-				/* No more messages to process, continue polling */
-				break;
-
-//			process_msg(nlh);
-release:
-			/* Release frame back to the kernel */
-			hdr->nm_status = NL_MMAP_STATUS_UNUSED;
-
-			/* Advance frame offset to next frame */
-			frame_offset = (frame_offset + frame_size) % ring_size;
-			return;
+			return 0;
 		}
+		if (hdr->nlmsg_type == NLMSG_ERROR) {
+			struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(hdr);
+
+			if (hdr->nlmsg_len - sizeof(*hdr) < sizeof(struct nlmsgerr)) {
+				printf("ERROR truncated\n");
+				return -1;
+			}
+
+			if (err->error == 0)
+				return 0;
+
+			return -1;
+		}
+		if (cb(hdr))
+			return -1;
 	}
+
+	return 1;
+}
+
+int show_task(struct nlmsghdr *hdr)
+{
+	int msg_len;
+	struct msgtemplate *msg;
+	struct nlattr *na;
+	int len;
+
+	msg_len = GENLMSG_PAYLOAD(hdr);
+
+	msg = (struct msgtemplate *)hdr;
+	na = (struct nlattr *) GENLMSG_DATA(msg);
+	len = 0;
+	while (len < msg_len) {
+		len += NLA_ALIGN(na->nla_len);
+		switch (na->nla_type) {
+		case TASK_DIAG_PID:
+			break;
+		case TASK_DIAG_PIDS:
+		{
+			struct task_diag_pids *pids;
+
+			/* For nested attributes, na follows */
+			pids = (struct task_diag_pids *) NLA_DATA(na);
+			printf("ppid %d\n", pids->ppid);
+			break;
+		}
+		case TASK_DIAG_COMM:
+		{
+			struct task_diag_comm *comm;
+			comm = (struct task_diag_comm *) NLA_DATA(na);
+			printf("state %d\n", comm->state);
+			break;
+		}
+		case TASK_DIAG_CRED:
+		{
+			struct task_diag_creds *creds;
+			creds = (struct task_diag_creds *) NLA_DATA(na);
+			printf("uid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
+			printf("gid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
+			break;
+		}
+		default:
+			fprintf(stderr, "Unknown nla_type %d\n",
+				na->nla_type);
+		}
+		na = (struct nlattr *) (GENLMSG_DATA(msg) + len);
+	}
+
+	return 0;
+}
+
+static int stop;
+void sigalarm(int sig)
+{
+	stop = 1;
 }
 
 int main(int argc, char *argv[])
 {
-	int rc, rep_len;//, aggr_len;
+	int rc, rep_len, i;
 	__u16 id;
 	__u32 mypid;
 	int nl_sd = -1;
-//	int len = 0;
-	struct task_diag_pid pid_req = {
-			.pid = getpid(),
-			.show_flags = TASK_DIAG_SHOW_PIDS |
-					TASK_DIAG_SHOW_COMM
-	};
+	struct {
+		struct task_diag_pid req;
+		int pids[2];
+	} pid_req;
+	char buf[4096];
 
-//	struct nlattr *na;
-	struct msgtemplate msg;
+	signal(SIGALRM, sigalarm);
 
+	pid_req.req.show_flags = TASK_DIAG_SHOW_PIDS | TASK_DIAG_SHOW_COMM | TASK_DIAG_SHOW_CRED;
+	pid_req.req.num = 2;
+	pid_req.req.pids[0] = 1;
+	pid_req.req.pids[1] = getpid();
 
 	nl_sd = create_nl_socket(NETLINK_GENERIC);
 	if (nl_sd < 0) {
@@ -361,122 +278,52 @@ int main(int argc, char *argv[])
 		goto err;
 	}
 
-	set_rings(nl_sd);
-
-	struct timeval start, end;
-	int i, j;
+	stop = 0;
 	i = 0;
-	gettimeofday(&start, NULL);
-	while (1) {
-		gettimeofday(&end, NULL);
-		if ( (start.tv_sec + 1 < end.tv_sec) ||
-		    (start.tv_sec + 1 == end.tv_sec && start.tv_usec <= end.tv_usec) ) {
-			printf("%d\n", i);
-			break;
-		}
-
-		i++;
-
-		rc = send_cmd(nl_sd, id, 1 /*mypid*/, TASKDIAG_CMD_GET,
+	alarm(1);
+	while (!stop) {
+		rc = send_cmd(nl_sd, id, mypid, TASKDIAG_CMD_GET,
 			      TASKDIAG_CMD_ATTR_PID, &pid_req, sizeof(pid_req));
 		if (rc < 0) {
 			fprintf(stderr, "error sending tid/tgid cmd\n");
-			goto done;
+			goto err;
 		}
-		recv_msg(nl_sd);
-#if 0
-		do {
-			rep_len = recv(nl_sd, &msg, sizeof(msg), 0);
 
-			if (rep_len < 0) {
-				fprintf(stderr, "nonfatal reply error: errno %d\n",
-					errno);
-				continue;
-			}
-			if (msg.n.nlmsg_type == NLMSG_ERROR ||
-			    !NLMSG_OK((&msg.n), rep_len)) {
-				struct nlmsgerr *err = NLMSG_DATA(&msg);
-				fprintf(stderr, "fatal reply error,  errno %d\n",
-					err->error);
-				goto done;
-			}
+		rep_len = recv(nl_sd, &buf, sizeof(buf), 0);
 
-	#if 0
-			PRINTF("nlmsghdr size=%zu, nlmsg_len=%d, rep_len=%d\n",
-			       sizeof(struct nlmsghdr), msg.n.nlmsg_len, rep_len);
-
-
-			rep_len = GENLMSG_PAYLOAD(&msg.n);
-			PRINTF("nlmsghdr size=%zu, nlmsg_len=%d, rep_len=%d\n",
-			       sizeof(struct nlmsghdr), msg.n.nlmsg_len, rep_len);
-
-			na = (struct nlattr *) GENLMSG_DATA(&msg);
-			len = 0;
-			while (len < rep_len) {
-				len += NLA_ALIGN(na->nla_len);
-				switch (na->nla_type) {
-				case TASK_DIAG_PID:
-					break;
-				case TASK_DIAG_PIDS:
-				{
-					struct task_diag_pids *pids;
-
-					aggr_len = NLA_PAYLOAD(na->nla_len);
-					/* For nested attributes, na follows */
-					pids = (struct task_diag_pids *) NLA_DATA(na);
-					printf("ppid %d\n", pids->ppid);
-					break;
-				}
-				case TASK_DIAG_COMM:
-				{
-					struct task_diag_comm *comm;
-					aggr_len = NLA_PAYLOAD(na->nla_len);
-					comm = (struct task_diag_comm *) NLA_DATA(na);
-					printf("state %d\n", comm->state);
-					break;
-				}
-				case TASK_DIAG_CRED:
-				{
-					struct task_diag_creds *creds;
-					aggr_len = NLA_PAYLOAD(na->nla_len);
-					creds = (struct task_diag_creds *) NLA_DATA(na);
-					printf("uid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
-					printf("gid: %d %d %d %d\n", creds->uid, creds->euid, creds->suid, creds->fsuid);
-					break;
-				}
-				default:
-					fprintf(stderr, "Unknown nla_type %d\n",
-						na->nla_type);
-				}
-				na = (struct nlattr *) (GENLMSG_DATA(&msg) + len);
-			}
-	#endif
-		} while (0);
-#endif
-	}
-
-	int fd, fd_self;
-	char buf[4096];
-	fd_self = open("/proc/", O_RDONLY);
-	i = 0;
-	gettimeofday(&start, NULL);
-	while (1) {
-		gettimeofday(&end, NULL);
-		if ( (start.tv_sec + 1 < end.tv_sec) ||
-		    (start.tv_sec + 1 == end.tv_sec && start.tv_usec <= end.tv_usec) ) {
-			printf("%d\n", i);
-			break;
+		if (rep_len < 0) {
+			fprintf(stderr, "nonfatal reply error: errno %d\n",
+				errno);
+			goto err;
 		}
+
+		nlmsg_receive(buf, rep_len, &show_task);
 
 		i++;
+	}
+	printf("task_diag: %d\n", i);
 
-		fd = openat(fd_self, "1/status", O_RDONLY);
+	int fd, fd_proc;
+	fd_proc = open("/proc/", O_RDONLY);
+
+	i = 0;
+	stop = 0;
+	alarm(1);
+	while (!stop) {
+		fd = openat(fd_proc, "1/status", O_RDONLY);
 		if (fd < 0)
 			break;
 		read(fd, buf, sizeof(buf));
 		close(fd);
+
+		fd = openat(fd_proc, "self/status", O_RDONLY);
+		if (fd < 0)
+			break;
+		read(fd, buf, sizeof(buf));
+		close(fd);
+		i++;
 	}
-done:
+	printf("proc: %d\n", i);
 err:
 	close(nl_sd);
 	return 0;

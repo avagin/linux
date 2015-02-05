@@ -214,14 +214,14 @@ static int nlmsg_receive(void *buf, int len, int (*cb)(struct nlmsghdr *))
 int show_task(struct nlmsghdr *hdr)
 {
 	int msg_len;
-	struct msgtemplate *p;
+	struct msgtemplate *msg;
 	struct nlattr *na;
 	int len;
 
 	msg_len = GENLMSG_PAYLOAD(hdr);
 
-	p = (struct msgtemplate *)hdr;
-	na = (struct nlattr *) GENLMSG_DATA(p);
+	msg = (struct msgtemplate *)hdr;
+	na = (struct nlattr *) GENLMSG_DATA(msg);
 	len = 0;
 	while (len < msg_len) {
 		len += NLA_ALIGN(na->nla_len);
@@ -256,7 +256,7 @@ int show_task(struct nlmsghdr *hdr)
 			fprintf(stderr, "Unknown nla_type %d\n",
 				na->nla_type);
 		}
-		na = (struct nlattr *) (GENLMSG_DATA(p) + len);
+		na = (struct nlattr *) (GENLMSG_DATA(msg) + len);
 	}
 
 	return 0;

@@ -1,4 +1,4 @@
-all: task_diag
+all: task_diag task_diag_perf
 
 CFLAGS += -Wall -O2
 
