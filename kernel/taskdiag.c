@@ -2,6 +2,7 @@
 #include <net/genetlink.h>
 #include <linux/pid_namespace.h>
 #include <linux/ptrace.h>
+#include <linux/proc_fs.h>
 
 static struct genl_family family = {
 	.id		= GENL_ID_GENERATE,
@@ -113,16 +114,15 @@ static void fill_creds(struct task_struct *p, struct task_diag_creds *diag_cred)
 }
 
 static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
-				u64 show_flags, struct genl_info *info, u8 cmd)
+				u64 show_flags, u8 cmd, u32 portid, u32 seq)
 {
 	struct nlattr *attr;
 	void *reply;
 
-	reply = genlmsg_put_reply(skb, info, &family, 0, cmd);
-	if (reply == NULL) {
-		nlmsg_free(skb);
+	reply = genlmsg_put(skb, portid, seq, &family, 0, cmd);
+//	reply = genlmsg_put_reply(skb, info, &family, 0, cmd);
+	if (reply == NULL)
 		return -EMSGSIZE;
-	}
 
 	if (show_flags & TASK_DIAG_SHOW_PIDS) {
 		attr = nla_reserve(skb, TASK_DIAG_PIDS, sizeof(struct task_diag_pids));
@@ -152,6 +152,33 @@ static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
 err:
 	genlmsg_cancel(skb, reply);
 	return -EMSGSIZE;
+}
+
+static int taskdiag_dumpid(struct sk_buff *skb, struct netlink_callback *cb)
+{
+	struct pid_namespace *ns = task_active_pid_ns(current);
+	struct tgid_iter iter;
+	u64 show_flags = ~0ULL;
+	int rc;
+
+	iter.tgid = cb->args[0];
+	iter.task = NULL;
+	for (iter = next_tgid(ns, iter);
+	     iter.task;
+	     iter.tgid += 1, iter = next_tgid(ns, iter)) {
+//		if (!has_pid_permissions(ns, iter.task, 2))
+//			continue;
+
+		rc = task_diag_fill(iter.task, skb, show_flags, TASKDIAG_CMD_NEW, NETLINK_CB(cb->skb).portid, cb->nlh->nlmsg_seq);
+		if (rc < 0) {
+			put_task_struct(iter.task);
+			break; //FIXME error
+		}
+	}
+
+	cb->args[0] = iter.tgid;
+
+	return skb->len;
 }
 
 static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
@@ -189,7 +216,7 @@ static int taskdiag_user_cmd(struct sk_buff *skb, struct genl_info *info)
 			goto err;
 		};
 
-		rc = task_diag_fill(tsk, rep_skb, pid_req->show_flags, info, TASKDIAG_CMD_NEW);
+		rc = task_diag_fill(tsk, rep_skb, pid_req->show_flags, TASKDIAG_CMD_NEW, info->snd_portid, info->snd_seq);
 		put_task_struct(tsk);
 		if (rc < 0)
 			goto err;
@@ -209,6 +236,7 @@ static const struct genl_ops taskdiag_ops[] = {
 	{
 		.cmd		= TASKDIAG_CMD_GET,
 		.doit		= taskdiag_user_cmd,
+		.dumpit		= taskdiag_dumpid,
 		.policy		= taskstats_cmd_get_policy,
 		.flags		= GENL_ADMIN_PERM,
 	},
