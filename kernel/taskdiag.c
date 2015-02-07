@@ -3,6 +3,7 @@
 #include <linux/pid_namespace.h>
 #include <linux/ptrace.h>
 #include <linux/proc_fs.h>
+#include <linux/sched.h>
 
 static struct genl_family family = {
 	.id		= GENL_ID_GENERATE,
@@ -20,7 +21,7 @@ static size_t taskdiag_packet_size(u64 show_flags)
 	if (show_flags & TASK_DIAG_SHOW_PIDS)
 		size += nla_total_size(sizeof(struct task_diag_pids));
 	if (show_flags & TASK_DIAG_SHOW_COMM)
-		size += nla_total_size(sizeof(struct task_diag_comm));
+		size += nla_total_size(sizeof(struct task_diag_comm) + TASK_COMM_LEN);
 	if (show_flags & TASK_DIAG_SHOW_CRED)
 		size += nla_total_size(sizeof(struct task_diag_creds));
 
@@ -76,10 +77,25 @@ static inline const __u8 get_task_state(struct task_struct *tsk)
 	return task_state_array[fls(state)];
 }
 
-static void fill_comm(struct task_struct *p, struct task_diag_comm *comm)
+static int fill_comm(struct task_struct *p, struct sk_buff *skb)
 {
-	comm->state = get_task_state(p);
+	struct task_diag_comm *comm;
+	char tcomm[sizeof(p->comm)];
+	struct nlattr *attr;
+	int len;
 
+	get_task_comm(tcomm, p);
+	len = strlen(tcomm) + 1;
+
+	attr = nla_reserve(skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm) + len);
+	if (!attr)
+		return -EMSGSIZE;
+
+	comm = nla_data(attr);
+	comm->state = get_task_state(p);
+	memcpy(comm->comm, tcomm, len);
+
+	return 0;
 }
 
 static inline void caps2diag(struct task_diag_caps *diag, const kernel_cap_t *cap)
@@ -132,11 +148,8 @@ static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
 	}
 
 	if (show_flags & TASK_DIAG_SHOW_COMM) {
-		attr = nla_reserve(skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm));
-		if (!attr)
+		if (fill_comm(tsk, skb))
 			goto err;
-
-		fill_comm(tsk, nla_data(attr));
 	}
 
 	if (show_flags & TASK_DIAG_SHOW_CRED) {

@@ -30,6 +30,7 @@ enum {
 
 struct task_diag_comm {
 	__u8 state;
+	char comm[0];
 };
 
 struct task_diag_caps {

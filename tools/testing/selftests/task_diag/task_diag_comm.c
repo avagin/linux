@@ -184,7 +184,7 @@ int show_task(struct nlmsghdr *hdr)
 		{
 			struct task_diag_comm *comm;
 			comm = (struct task_diag_comm *) NLA_DATA(na);
-			pr_info("state %d\n", comm->state);
+			pr_info("comm %20s state %d\n", comm->comm, comm->state);
 			break;
 		}
 		case TASK_DIAG_CRED:
