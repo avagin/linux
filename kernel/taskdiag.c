@@ -20,6 +20,8 @@ static size_t taskdiag_packet_size(u64 show_flags)
 	size = nla_total_size(sizeof(u32));
 	if (show_flags & TASK_DIAG_SHOW_PIDS)
 		size += nla_total_size(sizeof(struct task_diag_pids));
+	if (show_flags & TASK_DIAG_SHOW_COMM)
+		size += nla_total_size(sizeof(struct task_diag_comm) + TASK_COMM_LEN);
 
 	return size;
 }
@@ -59,6 +61,52 @@ static int fill_pids(struct task_struct *p, struct sk_buff *skb)
 	return 0;
 }
 
+/*
+ * The task state array is a strange "bitmap" of
+ * reasons to sleep. Thus "running" is zero, and
+ * you can test for combinations of others with
+ * simple bit tests.
+ */
+static const __u8 task_state_array[] = {
+	TASK_DIAG_RUNNING,
+	TASK_DIAG_INTERRUPTIBLE,
+	TASK_DIAG_UNINTERRUPTIBLE,
+	TASK_DIAG_STOPPED,
+	TASK_DIAG_TRACE_STOP,
+	TASK_DIAG_DEAD,
+	TASK_DIAG_ZOMBIE,
+};
+
+static inline const __u8 get_task_state(struct task_struct *tsk)
+{
+	unsigned int state = (tsk->state | tsk->exit_state) & TASK_REPORT;
+
+	BUILD_BUG_ON(1 + ilog2(TASK_REPORT) != ARRAY_SIZE(task_state_array)-1);
+
+	return task_state_array[fls(state)];
+}
+
+static int fill_comm(struct task_struct *p, struct sk_buff *skb)
+{
+	struct task_diag_comm *comm;
+	char tcomm[sizeof(p->comm)];
+	struct nlattr *attr;
+	int len;
+
+	get_task_comm(tcomm, p);
+	len = strlen(tcomm) + 1;
+
+	attr = nla_reserve(skb, TASK_DIAG_COMM, sizeof(struct task_diag_comm) + len);
+	if (!attr)
+		return -EMSGSIZE;
+
+	comm = nla_data(attr);
+	comm->state = get_task_state(p);
+	memcpy(comm->comm, tcomm, len);
+
+	return 0;
+}
+
 static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
 				u64 show_flags, u32 portid, u32 seq)
 {
@@ -71,6 +119,12 @@ static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
 
 	if (show_flags & TASK_DIAG_SHOW_PIDS) {
 		err = fill_pids(tsk, skb);
+		if (err)
+			goto err;
+	}
+
+	if (show_flags & TASK_DIAG_SHOW_COMM) {
+		err = fill_comm(tsk, skb);
 		if (err)
 			goto err;
 	}

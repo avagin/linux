@@ -9,9 +9,26 @@
 
 enum {
 	TASK_DIAG_PIDS,
+	TASK_DIAG_COMM,
 };
 
 #define TASK_DIAG_SHOW_PIDS (1ULL << TASK_DIAG_PIDS)
+#define TASK_DIAG_SHOW_COMM (1ULL << TASK_DIAG_COMM)
+
+enum {
+	TASK_DIAG_RUNNING,
+	TASK_DIAG_INTERRUPTIBLE,
+	TASK_DIAG_UNINTERRUPTIBLE,
+	TASK_DIAG_STOPPED,
+	TASK_DIAG_TRACE_STOP,
+	TASK_DIAG_DEAD,
+	TASK_DIAG_ZOMBIE,
+};
+
+struct task_diag_comm {
+	__u8 state;
+	char comm[0];
+};
 
 struct task_diag_pids {
 	__u32	tgid;
