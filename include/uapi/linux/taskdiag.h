@@ -10,10 +10,12 @@
 enum {
 	TASK_DIAG_PIDS,
 	TASK_DIAG_COMM,
+	TASK_DIAG_CRED,
 };
 
 #define TASK_DIAG_SHOW_PIDS (1ULL << TASK_DIAG_PIDS)
 #define TASK_DIAG_SHOW_COMM (1ULL << TASK_DIAG_COMM)
+#define TASK_DIAG_SHOW_CRED (1ULL << TASK_DIAG_CRED)
 
 enum {
 	TASK_DIAG_RUNNING,
@@ -28,6 +30,26 @@ enum {
 struct task_diag_comm {
 	__u8 state;
 	char comm[0];
+};
+
+struct task_diag_caps {
+	__u32 cap[_LINUX_CAPABILITY_U32S_3];
+};
+
+struct task_diag_creds {
+	struct task_diag_caps cap_inheritable;
+	struct task_diag_caps cap_permitted;
+	struct task_diag_caps cap_effective;
+	struct task_diag_caps cap_bset;
+
+	__u32 uid;
+	__u32 euid;
+	__u32 suid;
+	__u32 fsuid;
+	__u32 gid;
+	__u32 egid;
+	__u32 sgid;
+	__u32 fsgid;
 };
 
 struct task_diag_pids {

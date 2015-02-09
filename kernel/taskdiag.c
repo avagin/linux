@@ -22,6 +22,8 @@ static size_t taskdiag_packet_size(u64 show_flags)
 		size += nla_total_size(sizeof(struct task_diag_pids));
 	if (show_flags & TASK_DIAG_SHOW_COMM)
 		size += nla_total_size(sizeof(struct task_diag_comm) + TASK_COMM_LEN);
+	if (show_flags & TASK_DIAG_SHOW_CRED)
+		size += nla_total_size(sizeof(struct task_diag_creds));
 
 	return size;
 }
@@ -107,6 +109,46 @@ static int fill_comm(struct task_struct *p, struct sk_buff *skb)
 	return 0;
 }
 
+static inline void caps2diag(struct task_diag_caps *diag, const kernel_cap_t *cap)
+{
+	int i;
+
+	for (i = 0; i < _LINUX_CAPABILITY_U32S_3; i++)
+		diag->cap[i] = cap->cap[i];
+}
+
+static int fill_creds(struct task_struct *p, struct sk_buff *skb)
+{
+	struct user_namespace *user_ns = current_user_ns();
+	struct task_diag_creds *diag_cred;
+	const struct cred *cred;
+	struct nlattr *attr;
+
+	attr = nla_reserve(skb, TASK_DIAG_CRED, sizeof(struct task_diag_creds));
+	if (!attr)
+		return -EMSGSIZE;
+
+	diag_cred = nla_data(attr);
+
+	cred = get_task_cred(p);
+
+	caps2diag(&diag_cred->cap_inheritable, &cred->cap_inheritable);
+	caps2diag(&diag_cred->cap_permitted, &cred->cap_permitted);
+	caps2diag(&diag_cred->cap_effective, &cred->cap_effective);
+	caps2diag(&diag_cred->cap_bset, &cred->cap_bset);
+
+	diag_cred->uid   = from_kuid_munged(user_ns, cred->uid);
+	diag_cred->euid  = from_kuid_munged(user_ns, cred->euid);
+	diag_cred->suid  = from_kuid_munged(user_ns, cred->suid);
+	diag_cred->fsuid = from_kuid_munged(user_ns, cred->fsuid);
+	diag_cred->gid   = from_kgid_munged(user_ns, cred->gid);
+	diag_cred->egid  = from_kgid_munged(user_ns, cred->egid);
+	diag_cred->sgid  = from_kgid_munged(user_ns, cred->sgid);
+	diag_cred->fsgid = from_kgid_munged(user_ns, cred->fsgid);
+
+	return 0;
+}
+
 static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
 				u64 show_flags, u32 portid, u32 seq)
 {
@@ -125,6 +167,12 @@ static int task_diag_fill(struct task_struct *tsk, struct sk_buff *skb,
 
 	if (show_flags & TASK_DIAG_SHOW_COMM) {
 		err = fill_comm(tsk, skb);
+		if (err)
+			goto err;
+	}
+
+	if (show_flags & TASK_DIAG_SHOW_CRED) {
+		err = fill_creds(tsk, skb);
 		if (err)
 			goto err;
 	}
