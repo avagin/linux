@@ -1,0 +1,17 @@
+language: c
+sudo: required
+dist: trusty
+cache: ccache
+env:
+  global:
+    - secure: "g0LBP95hHmnTyvQ1BVPGtZG082N+TJ4uPOq9syVIvENwauVdUpo6LfFLRy+NKjKdeCeUEyp6xdHrj/0m3S4+V2WURi4Walpc3B6Wm/D/eQ9psJlNQGaCrWi/e/hTWQWUvTeP+PpkhlwCSWRHJW8WRowqZ2jK58fBQdcNtYtjFIT1PWDJKFfWmWfpzekVwiiYcFOISAIahFn/UndZ3ERIKTKNiMdh2Zv93R065/6zZbC3jrKpywm0yvJC5m9gNjpweq80Q2EYJaQAx6zh+YdtjTN3+VZ0eXBzascDYKg0DPsEk6SwwLUGF96bC11y1vpiYBLr01jwP0ZS+Xk6uaR2oxrgFCC/abUaAHUk+SUPUg9KoysZAZ9kdeRkmoQ4Mq8CtThSYjMIgBz0jP0wkj5/JV+ou2xxQkRAFu/wjT8wcvh2ZKQ6Ny8p7+TXEGsZYyLymzAcoKDRfi63f2Wgau+ZZxY+CfJNnMhlSFXT7fK8vZKPbrmbP0Kwf/bE37crc61E04NdVpV+zwabV1Ch/ViXTf+q3ZcRo36ruP52DChTXk8xVM9gxnvgu2Ynu7CzB9BOOW/dGDDlgb57ucveJDMYs1WSiUpoY6iTT+iacwQ3oZyQTTPuBtlR68SJ5SKxgvVAWxite8c+5NuJ4ZV7xt471ys2HCdlNPkahm+wtwXBHaI="
+  matrix:
+    - KASAN=0
+    - KASAN=1
+script:
+  - sudo apt-get update
+  - sudo apt-get install -qq --no-install-recommends protobuf-c-compiler libprotobuf-c0-dev libaio-dev libprotobuf-dev protobuf-compiler python-ipaddr libcap-dev libnl-3-dev gcc-multilib libc6-dev-i386 gdb bash python-protobuf libnet-dev util-linux asciidoc xmlto libnl-route-3-dev kexec-tools libssl-dev libelf-dev strace ccache
+  - sudo ./scripts/travis-ci
+after_failure:
+  - sudo dmesg
+group: deprecated-2017Q2
