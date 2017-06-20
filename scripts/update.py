@@ -9,6 +9,7 @@ trees = [
     ("percpu",      "for-next"),
     ("cgroup",      "for-next"),
     ("userns",      "for-next"),
+    ("userns",      "for-linus"),
     ("tip",         "auto-latest"),
 ]
 
@@ -34,9 +35,9 @@ for t in trees:
     p = subprocess.Popen("git diff --stat origin/%s" % branch, stdout = subprocess.PIPE, shell = True)
     out = p.stdout.read()
     p.stdout.close()
-    p.wait()
+    ret = p.wait()
     print out
-    if not out:
+    if ret == 0 and not out:
         continue
     run_cmd("git push -f origin %s" % branch)
 
