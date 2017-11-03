@@ -287,6 +287,7 @@ static int pid_ns_ctl_handler(struct ctl_table *table, int write,
 {
 	struct pid_namespace *pid_ns = task_active_pid_ns(current);
 	struct ctl_table tmp = *table;
+	int ret, next;
 
 	if (write && !ns_capable(pid_ns->user_ns, CAP_SYS_ADMIN))
 		return -EPERM;
@@ -297,8 +298,18 @@ static int pid_ns_ctl_handler(struct ctl_table *table, int write,
 	 * it should synchronize its usage with external means.
 	 */
 
-	tmp.data = &pid_ns->idr.idr_next;
-	return proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	next = idr_get_cursor(&pid_ns->idr) - 1;
+
+	tmp.data = &next;
+	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+	if (ret < 0)
+		return ret;
+
+	if (!write)
+		return 0;
+
+	idr_set_cursor(&pid_ns->idr, next + 1);
+	return 0;
 }
 
 extern int pid_max;
