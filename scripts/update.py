@@ -20,7 +20,7 @@ def run_cmd(cmd):
     if ret:
         raise Exception(ret)
 
-run_cmd("git fetch linux")
+run_cmd("git fetch -n linux")
 run_cmd("git checkout -f master")
 run_cmd("git clean -dxf")
 run_cmd("git rebase linux/master")
