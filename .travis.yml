@@ -14,4 +14,3 @@ script:
   - sudo ./scripts/travis-ci
 after_failure:
   - sudo dmesg
-group: deprecated-2017Q2
