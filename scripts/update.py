@@ -11,6 +11,7 @@ trees = [
     ("userns",      "for-next"),
     ("userns",      "for-linus"),
     ("tip",         "auto-latest"),
+    ("mmotm",       "auto-latest"),
 ]
 
 def run_cmd(cmd):
