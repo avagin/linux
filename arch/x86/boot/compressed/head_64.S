@@ -332,7 +332,7 @@ ENTRY(startup_64)
 
 	/* Make sure we have GDT with 32-bit code segment */
 	leaq	gdt(%rip), %rax
-	movl	%eax, gdt64+2(%rip)
+	movl	%rax, gdt64+2(%rip)
 	lgdt	gdt64(%rip)
 
 	/*
