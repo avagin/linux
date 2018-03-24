@@ -37,7 +37,7 @@ for t in trees:
     print out
     if ret == 0 and not out:
         continue
-    run_cmd("git branch -D %s || true" % branch)
+    run_cmd("git branch -f -D %s || true" % branch)
     run_cmd("git checkout -f %s/%s -b %s" % (t[0], t[1], branch))
     run_cmd("git cherry-pick origin/master")
     run_cmd("git push -f origin %s" % branch)
