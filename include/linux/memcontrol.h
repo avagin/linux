@@ -352,7 +352,6 @@ out:
 struct lruvec *mem_cgroup_page_lruvec(struct page *, struct pglist_data *);
 
 bool task_in_mem_cgroup(struct task_struct *task, struct mem_cgroup *memcg);
-struct mem_cgroup *mem_cgroup_from_task(struct task_struct *p);
 
 static inline
 struct mem_cgroup *mem_cgroup_from_css(struct cgroup_subsys_state *css){
@@ -420,6 +419,8 @@ static inline bool mem_cgroup_is_descendant(struct mem_cgroup *memcg,
 	return cgroup_is_descendant(memcg->css.cgroup, root->css.cgroup);
 }
 
+void mm_update_memcg(struct mm_struct *mm, struct mem_cgroup *new);
+
 static inline bool mm_match_cgroup(struct mm_struct *mm,
 				   struct mem_cgroup *memcg)
 {
@@ -427,7 +428,7 @@ static inline bool mm_match_cgroup(struct mm_struct *mm,
 	bool match = false;
 
 	rcu_read_lock();
-	task_memcg = mem_cgroup_from_task(rcu_dereference(mm->owner));
+	task_memcg = rcu_dereference(mm->memcg);
 	if (task_memcg)
 		match = mem_cgroup_is_descendant(task_memcg, memcg);
 	rcu_read_unlock();
@@ -718,7 +719,7 @@ static inline void count_memcg_event_mm(struct mm_struct *mm,
 		return;
 
 	rcu_read_lock();
-	memcg = mem_cgroup_from_task(rcu_dereference(mm->owner));
+	memcg = rcu_dereference(mm->memcg);
 	if (likely(memcg)) {
 		count_memcg_events(memcg, idx, 1);
 		if (idx == OOM_KILL)
@@ -804,6 +805,10 @@ static inline struct lruvec *mem_cgroup_page_lruvec(struct page *page,
 						    struct pglist_data *pgdat)
 {
 	return &pgdat->lruvec;
+}
+
+static inline void mm_update_memcg(struct mm_struct *mm, struct mem_cgroup *new)
+{
 }
 
 static inline bool mm_match_cgroup(struct mm_struct *mm,
