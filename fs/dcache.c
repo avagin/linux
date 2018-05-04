@@ -1475,7 +1475,6 @@ void shrink_dcache_parent(struct dentry *parent)
 			break;
 
 		shrink_dentry_list(&data.dispose);
-		cond_resched();
 	}
 }
 EXPORT_SYMBOL(shrink_dcache_parent);
