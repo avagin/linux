@@ -570,8 +570,8 @@ asmlinkage __visible void __init start_kernel(void)
 	setup_log_buf(0);
 	vfs_caches_init_early();
 	sort_main_extable();
-	mm_init();
 	trap_init();
+	mm_init();
 
 	ftrace_init();
 
