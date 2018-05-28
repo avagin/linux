@@ -1881,8 +1881,8 @@ __kmem_cache_alias(const char *name, unsigned int size, unsigned int align,
 	struct kmem_cache *cachep;
 
 	cachep = find_mergeable(size, align, flags, name, ctor);
-	if (cachep) {
-		cachep->refcount++;
+	if (cachep && kmem_cache_tryget(cachep)) {
+		cachep->alias_count++;
 
 		/*
 		 * Adjust the object sizes so that we clear
