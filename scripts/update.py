@@ -4,6 +4,7 @@ import subprocess
 
 trees = [
     ("linux-next",  "master"),
+    ("net-next",    "master"),
     ("net",         "master"),
     ("vfs",         "for-next"),
     ("percpu",      "for-next"),
