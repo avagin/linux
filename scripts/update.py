@@ -13,6 +13,7 @@ trees = [
     ("userns",      "for-linus"),
     ("tip",         "auto-latest"),
     ("mmotm",       "auto-latest"),
+    ("dsahern",     "neigh/per-net-ns"),
 ]
 
 def run_cmd(cmd):
