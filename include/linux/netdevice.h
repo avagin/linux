@@ -3320,7 +3320,7 @@ static inline void netif_wake_subqueue(struct net_device *dev, u16 queue_index)
 int netif_set_xps_queue(struct net_device *dev, const struct cpumask *mask,
 			u16 index);
 int __netif_set_xps_queue(struct net_device *dev, const unsigned long *mask,
-			  u16 index, bool is_rxqs_map);
+			  u16 index, bool is_rxqs_map, bool cpuslocked);
 
 /**
  *	netif_attr_test_mask - Test a CPU or Rx queue set in a mask
