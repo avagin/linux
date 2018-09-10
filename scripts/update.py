@@ -14,6 +14,7 @@ trees = [
     ("tip",         "auto-latest"),
     ("mmotm",       "auto-latest"),
     ("dsahern",     "neigh/per-net-ns"),
+    ("dhowells-fs", "mount-api"),
 ]
 
 def run_cmd(cmd):
