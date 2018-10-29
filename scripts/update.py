@@ -7,7 +7,6 @@ trees = [
     ("net-next",    "master"),
     ("net",         "master"),
     ("vfs",         "for-next"),
-    ("percpu",      "for-next"),
     ("cgroup",      "for-next"),
     ("userns",      "for-next"),
     ("userns",      "for-linus"),
