@@ -14,6 +14,7 @@ trees = [
     ("mmotm",       "auto-latest"),
     ("dsahern",     "neigh/per-net-ns"),
     ("dhowells-fs", "mount-api"),
+    ("stable",      "linux-4.19.y"),
 ]
 
 def run_cmd(cmd):
