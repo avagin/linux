@@ -1,0 +1,34 @@
+From fb69782e321e9c674e09526d9e1f6e21adb6b94c Mon Sep 17 00:00:00 2001
+From: Andrei Vagin <avagin@google.com>
+Date: Tue, 14 May 2024 01:07:17 +0000
+Subject: [PATCH 0/3] improve handling of SECCOMP_IOCTL_NOTIF_RECV
+
+This patch set addresses two problems with the SECCOMP_IOCTL_NOTIF_RECV
+ioctl:
+* it doesn't return when the seccomp filter becomes unused (all tasks
+  have exited).
+* EPOLLHUP is triggered not when a task exits, but rather when it zombie
+  is collected.
+
+Andrei Vagin (3):
+  seccomp: interrupt SECCOMP_IOCTL_NOTIF_RECV when all users have exited
+  seccomp: release task filters when the task exits
+  selftests/seccomp: add test for NOTIF_RECV and unused filters
+
+ kernel/exit.c                                 |  3 +-
+ kernel/seccomp.c                              | 38 ++++++++++---
+ tools/testing/selftests/seccomp/seccomp_bpf.c | 54 +++++++++++++++++++
+ 3 files changed, 88 insertions(+), 7 deletions(-)
+
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Andy Lutomirski <luto@amacapital.net>
+Cc: Will Drewry <wad@chromium.org>
+Cc: Jens Axboe <axboe@kernel.dk>
+Cc: Christian Brauner <brauner@kernel.org>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Tycho Andersen <tandersen@netflix.com>
+
+
+-- 
+2.45.0.rc1.225.g2a3ae87e7f-goog
+
