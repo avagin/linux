@@ -502,6 +502,9 @@ static inline pid_t seccomp_can_sync_threads(void)
 		/* Skip current, since it is initiating the sync. */
 		if (thread == caller)
 			continue;
+		/* Skip exited threads. */
+		if (thread->flags & PF_EXITING)
+			continue;
 
 		if (thread->seccomp.mode == SECCOMP_MODE_DISABLED ||
 		    (thread->seccomp.mode == SECCOMP_MODE_FILTER &&
@@ -530,6 +533,8 @@ static inline void seccomp_filter_free(struct seccomp_filter *filter)
 
 static void __seccomp_filter_orphan(struct seccomp_filter *orig)
 {
+	lockdep_assert_held(&current->sighand->siglock);
+
 	while (orig && refcount_dec_and_test(&orig->users)) {
 		if (waitqueue_active(&orig->wqh))
 			wake_up_poll(&orig->wqh, EPOLLHUP);
@@ -563,19 +568,21 @@ static void __seccomp_filter_release(struct seccomp_filter *orig)
  * @tsk: task the filter should be released from.
  *
  * This function should only be called when the task is exiting as
- * it detaches it from its filter tree. As such, READ_ONCE() and
- * barriers are not needed here, as would normally be needed.
+ * it detaches it from its filter tree. PF_EXITING has to be set
+ * for the task.
  */
 void seccomp_filter_release(struct task_struct *tsk)
 {
-	struct seccomp_filter *orig = tsk->seccomp.filter;
+	struct seccomp_filter *orig;
 
-	/* We are effectively holding the siglock by not having any sighand. */
-	WARN_ON(tsk->sighand != NULL);
+	WARN_ON(!(tsk->flags & PF_EXITING));
 
+	spin_lock(&current->sighand->siglock);
+	orig = tsk->seccomp.filter;
 	/* Detach task from its filter tree. */
 	tsk->seccomp.filter = NULL;
 	__seccomp_filter_release(orig);
+	spin_unlock(&current->sighand->siglock);
 }
 
 /**
@@ -600,6 +607,10 @@ static inline void seccomp_sync_threads(unsigned long flags)
 	for_each_thread(caller, thread) {
 		/* Skip current, since it needs no changes. */
 		if (thread == caller)
+			continue;
+
+		/* Skip exited threads. */
+		if (thread->flags & PF_EXITING)
 			continue;
 
 		/* Get a task reference for the new leaf node. */
@@ -2126,6 +2137,11 @@ static struct seccomp_filter *get_nth_filter(struct task_struct *task,
 	 */
 	spin_lock_irq(&task->sighand->siglock);
 
+	if (task->flags & PF_EXITING) {
+		spin_unlock_irq(&task->sighand->siglock);
+		return ERR_PTR(-ESRCH);
+	}
+
 	if (task->seccomp.mode != SECCOMP_MODE_FILTER) {
 		spin_unlock_irq(&task->sighand->siglock);
 		return ERR_PTR(-EINVAL);
@@ -2493,6 +2509,11 @@ int proc_pid_seccomp_cache(struct seq_file *m, struct pid_namespace *ns,
 
 	if (!lock_task_sighand(task, &flags))
 		return -ESRCH;
+
+	if (thread->flags & PF_EXITING) {
+		unlock_task_sighand(task, &flags);
+		return -ESRCH;
+	}
 
 	f = READ_ONCE(task->seccomp.filter);
 	if (!f) {
